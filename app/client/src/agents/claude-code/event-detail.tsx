@@ -848,6 +848,33 @@ function ToolDetail({
         </div>
       )
     }
+    case 'AskUserQuestion': {
+      // Questions live on tool_input (both Pre and Post). Answers
+      // live on the PostToolUse side — the Pre event's own payload
+      // doesn't include them, so when viewing the merged Pre row we
+      // read from the paired Post event. Both Post tool_input.answers
+      // and tool_response.answers are present (Claude duplicates
+      // them); we read whichever is available.
+      const questions: AskUserQuestion[] = Array.isArray(ti.questions) ? ti.questions : []
+      if (questions.length === 0) return null
+      const answerSource = (pairedEvent?.payload as Record<string, any> | undefined) ?? payload
+      const ansInput = answerSource?.tool_input as Record<string, any> | undefined
+      const ansResp = answerSource?.tool_response as Record<string, any> | undefined
+      const rawAnswers = ansInput?.answers ?? ansResp?.answers ?? ti.answers
+      const answers: Record<string, string> =
+        rawAnswers && typeof rawAnswers === 'object' ? rawAnswers : {}
+      return (
+        <div className="space-y-3">
+          {questions.map((q, qi) => (
+            <AskUserQuestionBlock
+              key={qi}
+              question={q}
+              answer={answers[String(q.question ?? '')]}
+            />
+          ))}
+        </div>
+      )
+    }
     default: {
       // Extract any base64 images from the tool_response so MCP tools
       // that return screenshots (chrome-devtools take_screenshot,
@@ -942,6 +969,97 @@ function AgentIdentity({
         </div>
       )}
     </>
+  )
+}
+
+// AskUserQuestion payload shapes (matches Claude Code's tool definition).
+interface AskUserQuestionOption {
+  label?: string
+  description?: string
+}
+interface AskUserQuestion {
+  question?: string
+  header?: string
+  options?: AskUserQuestionOption[]
+  multiSelect?: boolean
+}
+
+function AskUserQuestionBlock({
+  question,
+  answer,
+}: {
+  question: AskUserQuestion
+  answer: string | undefined
+}) {
+  const questionText = String(question.question ?? '')
+  const options = Array.isArray(question.options) ? question.options : []
+  // Match the answer to option labels.
+  //   - Single-select: the answer equals one label exactly. Labels
+  //     may contain commas (e.g. "All three, exactly as proposed"),
+  //     so equality is the only safe primary check.
+  //   - Multi-select: the answer is a comma-joined list of labels.
+  //     Only interpret it that way when every comma-split part is a
+  //     known label — otherwise a custom answer that happens to
+  //     contain a comma would false-match.
+  const labels = options.map((o) => String(o.label ?? ''))
+  const parts = typeof answer === 'string' ? answer.split(',').map((s) => s.trim()) : []
+  const isMultiSelect = parts.length > 1 && parts.every((p) => labels.includes(p))
+  const isSelected = (label: string) => {
+    if (typeof answer !== 'string' || label === '') return false
+    if (answer === label) return true
+    return isMultiSelect && parts.includes(label)
+  }
+  const anyMatched = labels.some((l) => isSelected(l))
+  return (
+    <div className="space-y-1">
+      <div className="flex gap-2">
+        <span className="text-muted-foreground shrink-0 w-20 text-right">Question:</span>
+        <div className="min-w-0 flex-1 space-y-1">
+          {questionText && <div>{questionText}</div>}
+          {options.length > 0 && (
+            <div className="space-y-1">
+              {options.map((o, oi) => {
+                const label = String(o.label ?? '')
+                const description = String(o.description ?? '')
+                const selected = isSelected(label)
+                return (
+                  <div
+                    key={oi}
+                    className={cn(
+                      'rounded border px-2 py-1 text-xs',
+                      selected ? 'border-green-500' : 'border-border',
+                    )}
+                  >
+                    <div className="font-mono">
+                      {selected && <span className="text-green-500">✓ </span>}
+                      {label}
+                    </div>
+                    {description && (
+                      <div className="text-[10px] text-muted-foreground">{description}</div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+      {answer != null && (
+        <div className="flex gap-2">
+          <span className="text-muted-foreground shrink-0 w-20 text-right">Answer:</span>
+          <div
+            className={cn(
+              'min-w-0 flex-1 whitespace-pre-wrap break-words',
+              // Green-outline highlight when the answer is "Other" /
+              // custom — i.e. doesn't match any of the listed options.
+              !anyMatched && 'rounded border border-green-500 px-2 py-1',
+            )}
+          >
+            {answer}
+          </div>
+        </div>
+      )}
+    </div>
   )
 }
 
