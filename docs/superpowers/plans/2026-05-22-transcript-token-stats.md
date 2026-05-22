@@ -27,7 +27,9 @@
 **Modify:**
 - `hooks/scripts/lib/config.mjs` — add `transcriptStatsEnabled` config field; thread three new env vars through `getServerEnv()`.
 - `hooks/scripts/lib/docker.mjs` — conditionally append the bind mount when `transcriptStatsEnabled`.
+- `test/hooks/scripts/lib/docker.test.mjs` (or create if missing) — bind-mount conditionality test.
 - `app/server/src/config.ts` — surface `transcriptStats` config block (flag + host/container bases).
+- `app/server/src/storage/types.ts` + `sqlite-adapter.ts` + `sqlite-adapter.test.ts` — add a focused `getSessionTranscriptPath(sessionId): Promise<string | null>` method (avoids using fat `getSessionById` which does multiple subqueries for `event_count`, `agent_count`, `agent_classes` — unnecessary work on the tab-open path).
 - `app/server/src/app.ts` — wire up the new route.
 - `app/client/src/lib/api-client.ts` — add `getTranscriptStats(sessionId)`.
 - `app/client/src/components/settings/session-modal.tsx` — mount `<TokenUsageCard>` inside `SessionStats`.
@@ -41,7 +43,7 @@
 
 - [ ] **Step 1.1: Add the transcriptStats block to the server config**
 
-Open `app/server/src/config.ts` and add a new section to the exported `config` object, after `shutdownDelayMs`:
+Open `app/server/src/config.ts` and add a new section to the exported `config` object **as the last field before the closing `}` of the config literal** (i.e., right after `startupGraceMs: 60_000,`):
 
 ```ts
   transcriptStats: {
@@ -61,6 +63,89 @@ Open `app/server/src/config.ts` and add a new section to the exported `config` o
 ```bash
 git add app/server/src/config.ts
 git commit -m "chore: server config for transcript-stats feature flag"
+```
+
+---
+
+## Task 1.5: Storage method — `getSessionTranscriptPath`
+
+The route needs the session's host-side transcript path. The existing `getSessionById` runs three subqueries (event_count, agent_count, agent_classes) that we don't need on every tab open. Add a focused method.
+
+**Files:**
+- Modify: `app/server/src/storage/types.ts`
+- Modify: `app/server/src/storage/sqlite-adapter.ts`
+- Modify: `app/server/src/storage/sqlite-adapter.test.ts`
+
+- [ ] **Step 1.5.1: Add failing test**
+
+Find the existing `getSessionById` test block in `app/server/src/storage/sqlite-adapter.test.ts` (search `getSessionById returns`). Append a new test in the same `describe` block:
+
+```ts
+  test('getSessionTranscriptPath returns the transcript_path column or null', async () => {
+    const projId = await store.createProject('proj-tp', 'P')
+    await store.upsertSession(
+      'sess-with-tp',
+      projId,
+      null,
+      null,
+      1000,
+      '/Users/test/.claude/projects/proj/sess-with-tp.jsonl',
+    )
+    await store.upsertSession('sess-no-tp', projId, null, null, 1000, null)
+
+    expect(await store.getSessionTranscriptPath('sess-with-tp')).toBe(
+      '/Users/test/.claude/projects/proj/sess-with-tp.jsonl',
+    )
+    expect(await store.getSessionTranscriptPath('sess-no-tp')).toBeNull()
+    expect(await store.getSessionTranscriptPath('nonexistent')).toBeNull()
+  })
+```
+
+(`upsertSession` signature is `(id, projectId, slug, metadata, startedAt, transcriptPath?)` — verify by reading the existing test or `storage/types.ts:76`.)
+
+- [ ] **Step 1.5.2: Run, confirm fail**
+
+```bash
+cd app/server && npx vitest run --no-coverage src/storage/sqlite-adapter.test.ts -t "getSessionTranscriptPath" 2>&1 | tail -10
+```
+
+Expected: fail — method doesn't exist.
+
+- [ ] **Step 1.5.3: Add to the interface**
+
+In `app/server/src/storage/types.ts`, find the `EventStore` interface (search `getSessionById(sessionId: string)` — around line 113). Add the new method right after `getSessionById`:
+
+```ts
+  getSessionTranscriptPath(sessionId: string): Promise<string | null>
+```
+
+- [ ] **Step 1.5.4: Implement in SqliteAdapter**
+
+In `app/server/src/storage/sqlite-adapter.ts`, find the existing `getSessionById` method (around line 821). Add the new method directly after it:
+
+```ts
+  async getSessionTranscriptPath(sessionId: string): Promise<string | null> {
+    const row = this.db
+      .prepare(`SELECT transcript_path FROM sessions WHERE id = ?`)
+      .get(sessionId) as { transcript_path: string | null } | undefined
+    return row?.transcript_path ?? null
+  }
+```
+
+- [ ] **Step 1.5.5: Run, confirm pass**
+
+```bash
+npx vitest run --no-coverage src/storage/sqlite-adapter.test.ts -t "getSessionTranscriptPath" 2>&1 | tail -10
+```
+
+Expected: pass.
+
+- [ ] **Step 1.5.6: Commit**
+
+```bash
+cd /Users/joe/Development/ai-tools/observe/agents-observe
+git add app/server/src/storage/types.ts app/server/src/storage/sqlite-adapter.ts app/server/src/storage/sqlite-adapter.test.ts
+git commit -m "feat: storage.getSessionTranscriptPath — focused query for transcript-stats route"
 ```
 
 ---
@@ -294,6 +379,33 @@ const FIXTURE_LINES = [
       ],
     },
   },
+  // Assistant msg1, block 3 (text) — third duplicate. Verifies that the
+  // dedup happens at the message.id level AND that usage isn't summed
+  // across blocks. A naive "stamp every line" implementation would
+  // tripled-count input_tokens here.
+  {
+    type: 'assistant',
+    uuid: 'as1c',
+    parentUuid: 'as1b',
+    sessionId: 's',
+    timestamp: '2026-05-22T00:00:01.700Z',
+    isSidechain: false,
+    requestId: 'req_aaaa',
+    message: {
+      id: 'msg1',
+      model: 'claude-opus-4-7',
+      stop_reason: 'tool_use',
+      usage: {
+        input_tokens: 10,
+        output_tokens: 100,
+        cache_read_input_tokens: 50,
+        cache_creation_input_tokens: 20,
+        cache_creation: { ephemeral_5m_input_tokens: 0, ephemeral_1h_input_tokens: 20 },
+        service_tier: 'standard',
+      },
+      content: [{ type: 'text', text: 'wrap-up' }],
+    },
+  },
   // Tool-result follow-up user line (propagates promptId)
   {
     type: 'user',
@@ -368,10 +480,13 @@ afterAll(() => {
 })
 
 describe('parseTranscriptFile — shape and dedup', () => {
-  test('summary aggregates main-agent only across models', async () => {
+  test('summary aggregates main-agent only across models — usage NOT summed across duplicate blocks of the same messageId', async () => {
     const stats = await parseTranscriptFile(FIXTURE_PATH)
-    expect(stats.summary.totalCalls).toBe(2) // msg1 + msg2, NOT msg3 (sub)
+    expect(stats.summary.totalCalls).toBe(2) // msg1 + msg2, NOT msg3 (sub), NOT msg1×3
     const byModel = [...stats.summary.byModel].sort((a, b) => a.model.localeCompare(b.model))
+    // Opus row: calls === 1 (not 3) and inputTokens === 10 (not 30).
+    // Catches a regression where dedup checks messageId presence but
+    // still updates usage on every block.
     expect(byModel).toEqual([
       {
         model: 'claude-opus-4-7',
@@ -671,6 +786,10 @@ describe('parseTranscriptFile — promptId resolution', () => {
     expect(stats.prompts).toEqual({
       p1: { text: 'hello world', timestamp: Date.parse('2026-05-22T00:00:00.000Z') },
     })
+    // Explicit anti-regression: no entry leaks from u2 (tool_result user
+    // line that propagates promptId=p1 but isn't an originating prompt).
+    expect(Object.keys(stats.prompts).length).toBe(1)
+    expect(Object.values(stats.prompts).every((p) => p.text !== 'ok')).toBe(true)
   })
 })
 ```
@@ -782,20 +901,26 @@ import { Hono } from 'hono'
 import { writeFileSync, mkdtempSync, chmodSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import transcriptStatsRouter from './transcript-stats'
 import type { EventStore } from '../storage/types'
 
-// Mock the server config so each test can flip the feature flag.
-vi.mock('../config', () => ({
-  config: {
-    transcriptStats: {
-      enabled: true,
-      hostBase: '',
-      containerBase: '',
-      maxFileBytes: 100 * 1024 * 1024,
-    },
-  },
+// Use vi.hoisted so the mocked config object is mutable across tests.
+// The plain vi.mock factory is evaluated once at module load and
+// vi.doMock + dynamic import is unreliable here because the router
+// closes over the imported `config` reference. With a hoisted mutable
+// object, flipping `transcriptConfig.enabled = false` in a test
+// changes what the already-loaded router sees on its next request.
+const transcriptConfig = vi.hoisted(() => ({
+  enabled: true,
+  hostBase: '',
+  containerBase: '',
+  maxFileBytes: 100 * 1024 * 1024,
 }))
+vi.mock('../config', () => ({
+  config: { transcriptStats: transcriptConfig },
+}))
+
+// Import after the mock is set up.
+import transcriptStatsRouter from './transcript-stats'
 
 function makeApp(store: Partial<EventStore>) {
   const app = new Hono<{ Variables: { store: EventStore } }>()
@@ -848,13 +973,17 @@ function writeFixture(): string {
 
 describe('GET /api/sessions/:sessionId/transcript-stats', () => {
   beforeEach(() => {
-    vi.resetModules()
+    // Reset the hoisted mutable config to defaults before each test.
+    transcriptConfig.enabled = true
+    transcriptConfig.hostBase = ''
+    transcriptConfig.containerBase = ''
+    transcriptConfig.maxFileBytes = 100 * 1024 * 1024
   })
 
   test('returns 200 with parsed stats when transcript exists', async () => {
     const path = writeFixture()
     const app = makeApp({
-      getSessionById: async () => ({ id: 'sess1', transcript_path: path }),
+      getSessionTranscriptPath: async () => path,
     })
     const res = await app.request('/api/sessions/sess1/transcript-stats')
     expect(res.status).toBe(200)
@@ -867,18 +996,10 @@ describe('GET /api/sessions/:sessionId/transcript-stats', () => {
   })
 
   test('returns 404 disabled when feature flag is off', async () => {
-    vi.doMock('../config', () => ({
-      config: {
-        transcriptStats: { enabled: false, hostBase: '', containerBase: '', maxFileBytes: 0 },
-      },
-    }))
-    const mod = await import('./transcript-stats')
-    const app = new Hono<{ Variables: { store: EventStore } }>()
-    app.use('*', async (c, next) => {
-      c.set('store', {} as EventStore)
-      await next()
+    transcriptConfig.enabled = false
+    const app = makeApp({
+      getSessionTranscriptPath: async () => '/never/reached.jsonl',
     })
-    app.route('/api', mod.default)
     const res = await app.request('/api/sessions/sess1/transcript-stats')
     expect(res.status).toBe(404)
     const body = await res.json()
@@ -887,7 +1008,7 @@ describe('GET /api/sessions/:sessionId/transcript-stats', () => {
 
   test('returns 404 no_transcript when session has no transcript_path', async () => {
     const app = makeApp({
-      getSessionById: async () => ({ id: 'sess1', transcript_path: null }),
+      getSessionTranscriptPath: async () => null,
     })
     const res = await app.request('/api/sessions/sess1/transcript-stats')
     expect(res.status).toBe(404)
@@ -897,7 +1018,7 @@ describe('GET /api/sessions/:sessionId/transcript-stats', () => {
 
   test('returns 404 file_not_found when transcript file does not exist', async () => {
     const app = makeApp({
-      getSessionById: async () => ({ id: 'sess1', transcript_path: '/nonexistent/foo.jsonl' }),
+      getSessionTranscriptPath: async () => '/nonexistent/foo.jsonl',
     })
     const res = await app.request('/api/sessions/sess1/transcript-stats')
     expect(res.status).toBe(404)
@@ -906,22 +1027,11 @@ describe('GET /api/sessions/:sessionId/transcript-stats', () => {
   })
 
   test('returns 413 file_too_large when transcript exceeds cap', async () => {
-    vi.doMock('../config', () => ({
-      config: {
-        transcriptStats: { enabled: true, hostBase: '', containerBase: '', maxFileBytes: 10 },
-      },
-    }))
-    const mod = await import('./transcript-stats')
+    transcriptConfig.maxFileBytes = 10
     const path = writeFixture()
-    const app = new Hono<{ Variables: { store: EventStore } }>()
-    app.use('*', async (c, next) => {
-      c.set(
-        'store',
-        { getSessionById: async () => ({ transcript_path: path }) } as unknown as EventStore,
-      )
-      await next()
+    const app = makeApp({
+      getSessionTranscriptPath: async () => path,
     })
-    app.route('/api', mod.default)
     const res = await app.request('/api/sessions/sess1/transcript-stats')
     expect(res.status).toBe(413)
     const body = await res.json()
@@ -936,13 +1046,44 @@ describe('GET /api/sessions/:sessionId/transcript-stats', () => {
       return // Some filesystems / CI environments forbid mode 000; skip.
     }
     const app = makeApp({
-      getSessionById: async () => ({ id: 'sess1', transcript_path: path }),
+      getSessionTranscriptPath: async () => path,
     })
     const res = await app.request('/api/sessions/sess1/transcript-stats')
     chmodSync(path, 0o600)
     expect([403, 404]).toContain(res.status)
     const body = await res.json()
     expect(['file_unreadable', 'file_not_found']).toContain(body.error)
+  })
+
+  test('returns 500 parse_error when the file contains malformed jsonl that throws', async () => {
+    // The current parser swallows JSON.parse errors per-line silently
+    // (this is intentional — partial corruption shouldn't fail the
+    // whole response). To exercise the parse_error branch, simulate a
+    // throw from inside the parser by mocking `parseTranscriptFile`.
+    const path = writeFixture()
+    vi.doMock('../services/transcript-parser', () => ({
+      parseTranscriptFile: async () => {
+        throw new Error('boom')
+      },
+    }))
+    // Force re-import of the route so it picks up the mocked parser.
+    vi.resetModules()
+    const reloaded = (await import('./transcript-stats')).default
+    const app = new Hono<{ Variables: { store: EventStore } }>()
+    app.use('*', async (c, next) => {
+      c.set(
+        'store',
+        { getSessionTranscriptPath: async () => path } as unknown as EventStore,
+      )
+      await next()
+    })
+    app.route('/api', reloaded)
+    const res = await app.request('/api/sessions/sess1/transcript-stats')
+    expect(res.status).toBe(500)
+    const body = await res.json()
+    expect(body.error).toBe('parse_error')
+    expect(body.message).toContain('boom')
+    vi.doUnmock('../services/transcript-parser')
   })
 })
 ```
@@ -985,8 +1126,7 @@ router.get('/sessions/:sessionId/transcript-stats', async (c) => {
 
   const sessionId = c.req.param('sessionId')
   const store = c.get('store')
-  const session = await store.getSessionById(sessionId)
-  const hostPath: string | null = session?.transcript_path ?? null
+  const hostPath = await store.getSessionTranscriptPath(sessionId)
   if (!hostPath) {
     return c.json(
       { error: 'no_transcript', message: 'No transcript path found for session.' },
@@ -1170,18 +1310,62 @@ Replace with:
   }
 ```
 
-- [ ] **Step 6.4: Confirm hooks tests still pass**
+- [ ] **Step 6.4: Add a config.test.mjs assertion that the env vars thread through correctly**
 
-```bash
-cd /Users/joe/Development/ai-tools/observe/agents-observe && npx vitest run --no-coverage test/hooks/scripts/lib/ 2>&1 | tail -10
+`test/hooks/scripts/lib/config.test.mjs` uses vitest. Add a new `describe` block at the bottom of the file:
+
+```js
+import { getConfig, getServerEnv } from '../../../../hooks/scripts/lib/config.mjs'
+
+describe('getServerEnv — transcript-stats env vars', () => {
+  beforeEach(() => {
+    delete process.env.AGENTS_OBSERVE_TRANSCRIPT_STATS
+  })
+  afterEach(() => {
+    delete process.env.AGENTS_OBSERVE_TRANSCRIPT_STATS
+  })
+
+  it('omits transcript-stats env vars when feature disabled', () => {
+    const env = getServerEnv(getConfig({ runtime: 'docker' }))
+    expect(env.AGENTS_OBSERVE_TRANSCRIPT_STATS).toBe('')
+    expect(env.AGENTS_OBSERVE_TRANSCRIPT_HOST_BASE).toBe('')
+    expect(env.AGENTS_OBSERVE_TRANSCRIPT_CONTAINER_BASE).toBe('')
+  })
+
+  it('populates transcript-stats env vars when feature enabled in docker', () => {
+    process.env.AGENTS_OBSERVE_TRANSCRIPT_STATS = '1'
+    const env = getServerEnv(getConfig({ runtime: 'docker' }))
+    expect(env.AGENTS_OBSERVE_TRANSCRIPT_STATS).toBe('1')
+    expect(env.AGENTS_OBSERVE_TRANSCRIPT_HOST_BASE).toMatch(/\.claude\/projects$/)
+    expect(env.AGENTS_OBSERVE_TRANSCRIPT_CONTAINER_BASE).toBe('/host/.claude/projects')
+  })
+
+  it('omits transcript-stats bases in local mode even when enabled', () => {
+    process.env.AGENTS_OBSERVE_TRANSCRIPT_STATS = '1'
+    const env = getServerEnv(getConfig({ runtime: 'local' }))
+    expect(env.AGENTS_OBSERVE_TRANSCRIPT_STATS).toBe('1')
+    expect(env.AGENTS_OBSERVE_TRANSCRIPT_HOST_BASE).toBe('')
+    expect(env.AGENTS_OBSERVE_TRANSCRIPT_CONTAINER_BASE).toBe('')
+  })
+})
 ```
 
-Expected: all existing hook tests still pass (no new tests for these changes — the wiring is exercised end-to-end by Task 9's manual verification).
+The `getConfig`/`getServerEnv` imports may already be present at the top of the file — re-use them if so.
 
-- [ ] **Step 6.5: Commit**
+- [ ] **Step 6.5: Confirm tests pass**
 
 ```bash
-git add hooks/scripts/lib/config.mjs hooks/scripts/lib/docker.mjs
+cd /Users/joe/Development/ai-tools/observe/agents-observe && npx vitest run --no-coverage test/hooks/scripts/lib/config.test.mjs 2>&1 | tail -10
+```
+
+Expected: existing tests + the three new ones all pass.
+
+The docker mount conditionality itself (Task 6.3) is e2e-verified in Task 10 — adding a test for it would require extracting `dockerRunArgs` from its current closure scope in `docker.mjs`, which is out of scope for v1.
+
+- [ ] **Step 6.6: Commit**
+
+```bash
+git add hooks/scripts/lib/config.mjs hooks/scripts/lib/docker.mjs test/hooks/scripts/lib/config.test.mjs
 git commit -m "feat: transcript-stats env flag + docker bind mount for ~/.claude/projects"
 ```
 
@@ -1207,7 +1391,7 @@ This endpoint is the exception to that pattern — the body matters on non-200 b
 
 - [ ] **Step 7.2: Add the method**
 
-Find a logical place near other session-related methods (search `getSession` or similar) and add this entry to the `api` object:
+Find the last method in the `api` object literal (just before its closing `}`) and add this new entry as the very last property. Don't worry about thematic placement — the file groups by chronology of additions, not topic.
 
 ```ts
 // Unlike other api.* methods which throw ApiError on non-2xx, this
@@ -1429,11 +1613,17 @@ export function TokenUsageCard({ sessionId }: { sessionId: string }) {
   const { data, isLoading } = useQuery({
     queryKey: ['transcript-stats', sessionId],
     queryFn: () => api.getTranscriptStats(sessionId),
-    // gcTime: 0 mirrors logs-modal — drop the per-call list as soon as
-    // no component observes this query so the per-call array doesn't
-    // sit in memory after the modal closes.
+    // Mirrors the existing SessionStats query (session-modal.tsx:715):
+    //   - staleTime: Infinity  — snapshot from tab-open; no refetch on
+    //     re-render or refocus
+    //   - gcTime: 0            — drop from cache as soon as no
+    //     component observes it; closing the modal effectively
+    //     unmounts, so reopening triggers a fresh fetch
+    //   - refetchOnWindowFocus: false — explicit (app-wide default
+    //     already false, but documented locally)
+    staleTime: Infinity,
     gcTime: 0,
-    refetchInterval: false,
+    refetchOnWindowFocus: false,
   })
 
   return (
@@ -1560,13 +1750,21 @@ Expected: all tests pass, formatting clean.
 
 - [ ] **Step 10.2: Confirm the disabled-state branch on the currently-running server**
 
-The user's dev server is already running without the flag set. Confirm it returns the disabled response (no restart needed for this check):
+The user's dev server is expected to be running without the flag set. First, confirm a server is actually listening — without this precondition check, a connection-refused error from the next curl can be mistakenly interpreted as success.
+
+```bash
+curl -sf http://127.0.0.1:4981/api/health > /dev/null && echo "server up" || echo "SERVER NOT RUNNING"
+```
+
+Expected: `server up`. If `SERVER NOT RUNNING`, stop here and report — don't proceed; the user needs to start the dev server first.
+
+If the server is up, check the disabled branch:
 
 ```bash
 curl -s "http://127.0.0.1:4981/api/sessions/5faf0a5f-9566-43e8-8483-74bbbba84e73/transcript-stats" | head -c 200
 ```
 
-Expected: `{"error":"disabled",…}`. If you get HTML or a 404 with no `error` field, the route isn't wired into `app.ts` — go back to Task 5.
+Expected: `{"error":"disabled",…}` and HTTP 404. If you get HTML, a 200, or a 404 with no `error` field, the route isn't wired into `app.ts` — go back to Task 5.
 
 - [ ] **Step 10.3: Document the enable instructions**
 
