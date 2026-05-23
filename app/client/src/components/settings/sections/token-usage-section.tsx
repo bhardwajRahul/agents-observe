@@ -1,9 +1,15 @@
 import { useQuery } from '@tanstack/react-query'
 import { Info } from 'lucide-react'
-import { api, type TranscriptStatsErrorCode, type TranscriptStatsData } from '@/lib/api-client'
+import {
+  api,
+  type TranscriptStatsErrorCode,
+  type TranscriptStatsByModel,
+  type TranscriptStatsPrompt,
+} from '@/lib/api-client'
 import { AgentLabel } from '@/components/shared/agent-label'
+import { getAgentColorById, buildAgentColorMap } from '@/lib/agent-utils'
 import type { Agent } from '@/types'
-import { CollapsibleSection } from './collapsible-section'
+import { useMemo } from 'react'
 import { ModelBadge } from './model-badge'
 import { SortableTable, type SortableColumn } from './sortable-table'
 
@@ -39,12 +45,17 @@ const ERROR_MESSAGES: Record<TranscriptStatsErrorCode, string> = {
   unknown: 'Token usage info is unavailable for this session.',
 }
 
-function AgentLabelByAgentId({ agentId, agents }: { agentId: string; agents: Agent[] }) {
-  const agent = agents.find((a) => a.id === agentId)
-  if (!agent) {
-    return <span className="font-mono text-muted-foreground">{agentId.slice(0, 12)}</span>
-  }
-  return <AgentLabel agent={agent} disableTooltip />
+function SectionShell({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="rounded-md border border-border mb-3 overflow-hidden">
+      <div className="px-4 py-3">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">
+          {title}
+        </div>
+        {children}
+      </div>
+    </div>
+  )
 }
 
 function Card({ label, value, valueClass }: { label: string; value: string; valueClass?: string }) {
@@ -56,7 +67,55 @@ function Card({ label, value, valueClass }: { label: string; value: string; valu
   )
 }
 
-export function TokenUsageSection({ sessionId, agents }: { sessionId: string; agents: Agent[] }) {
+/**
+ * Renders an agent name with the existing AgentLabel (tooltip + color)
+ * wrapped in a button that closes the modal and scrolls the event
+ * stream to the agent's first event.
+ */
+function AgentNameCell({
+  agentId,
+  agents,
+  agentColorMap,
+  onClick,
+}: {
+  agentId: string
+  agents: Agent[]
+  agentColorMap: Map<string, number>
+  onClick: (agentId: string) => void
+}) {
+  const agent = agents.find((a) => a.id === agentId)
+  if (!agent) {
+    return <span className="font-mono text-muted-foreground">{agentId.slice(0, 12)}</span>
+  }
+  const parentAgent = agent.parentAgentId
+    ? (agents.find((a) => a.id === agent.parentAgentId) ?? null)
+    : null
+  const color = getAgentColorById(agentId, agentColorMap)
+  return (
+    <button
+      type="button"
+      className={`cursor-pointer hover:underline ${color.textOnly}`}
+      onClick={() => onClick(agentId)}
+    >
+      <AgentLabel agent={agent} parentAgent={parentAgent} />
+    </button>
+  )
+}
+
+export function TokenUsageSection({
+  sessionId,
+  mainAgentId,
+  agents,
+  onAgentClick,
+  onPromptClick,
+}: {
+  sessionId: string
+  /** Agent id of the main session agent (== session id for claude-code). */
+  mainAgentId: string
+  agents: Agent[]
+  onAgentClick: (agentId: string) => void
+  onPromptClick: (text: string, timestamp: number) => void
+}) {
   const { data, isLoading } = useQuery({
     queryKey: ['transcript-stats', sessionId],
     queryFn: () => api.getTranscriptStats(sessionId),
@@ -65,34 +124,31 @@ export function TokenUsageSection({ sessionId, agents }: { sessionId: string; ag
     refetchOnWindowFocus: false,
   })
 
+  const agentColorMap = useMemo(() => buildAgentColorMap(agents), [agents])
+
   if (isLoading || !data) {
     return (
-      <CollapsibleSection
-        title="Token Usage"
-        preview={<div className="text-xs text-muted-foreground italic">Loading…</div>}
-        details={null}
-      />
+      <SectionShell title="Token Usage">
+        <div className="text-xs text-muted-foreground italic">Loading…</div>
+      </SectionShell>
     )
   }
 
   if (!data.ok) {
     return (
-      <CollapsibleSection
-        title="Token Usage"
-        preview={
-          <div className="flex items-start gap-2 text-xs text-muted-foreground italic">
-            <Info className="h-3 w-3 mt-0.5 shrink-0" />
-            <span>{ERROR_MESSAGES[data.error] ?? data.message}</span>
-          </div>
-        }
-        details={null}
-      />
+      <SectionShell title="Token Usage">
+        <div className="flex items-start gap-2 text-xs text-muted-foreground italic">
+          <Info className="h-3 w-3 mt-0.5 shrink-0" />
+          <span>{ERROR_MESSAGES[data.error] ?? data.message}</span>
+        </div>
+      </SectionShell>
     )
   }
 
   const stats = data.data
 
-  const byModelCols: SortableColumn<TranscriptStatsData['byModel'][number]>[] = [
+  // ── By Model ────────────────────────────────────────────────
+  const byModelCols: SortableColumn<TranscriptStatsByModel>[] = [
     {
       key: 'model',
       label: 'Model',
@@ -169,15 +225,21 @@ export function TokenUsageSection({ sessionId, agents }: { sessionId: string; ag
     },
   ]
 
-  const promptCols: SortableColumn<TranscriptStatsData['prompts'][number]>[] = [
+  // ── By Prompt ────────────────────────────────────────────────
+  const promptCols: SortableColumn<TranscriptStatsPrompt>[] = [
     {
       key: 'prompt',
       label: 'Prompt',
       sortType: 'string',
       render: (r) => (
-        <span className="block truncate max-w-[400px]" title={r.text}>
+        <button
+          type="button"
+          onClick={() => onPromptClick(r.text, r.timestamp)}
+          className="block truncate max-w-[400px] text-left cursor-pointer hover:underline"
+          title={r.text}
+        >
           {r.text}
-        </span>
+        </button>
       ),
       sortValue: (r) => r.text,
     },
@@ -244,13 +306,123 @@ export function TokenUsageSection({ sessionId, agents }: { sessionId: string; ag
     },
   ]
 
-  const subagentCols: SortableColumn<TranscriptStatsData['subagents'][number]>[] = [
+  // Prompts totals row
+  const promptTotals = {
+    durationMs: stats.prompts.reduce((s, p) => s + (p.durationMs ?? 0), 0),
+    toolCount: stats.prompts.reduce((s, p) => s + p.toolCount, 0),
+    requests: stats.prompts.reduce((s, p) => s + p.requests, 0),
+    inputTokens: stats.prompts.reduce((s, p) => s + p.inputTokens, 0),
+    outputTokens: stats.prompts.reduce((s, p) => s + p.outputTokens, 0),
+    costCents: stats.prompts.some((p) => p.costCents == null)
+      ? null
+      : stats.prompts.reduce((s, p) => s + (p.costCents ?? 0), 0),
+  }
+
+  // ── Agents (main + subagents) ────────────────────────────────
+  // Build the agents table rows: row 0 is the main agent (derived
+  // from main-call aggregates); subsequent rows are the subagents.
+  const mainAgentRow = useMemo(() => {
+    let model = ''
+    let cacheReadTokens = 0
+    let cacheCreate5mTokens = 0
+    let cacheCreate1hTokens = 0
+    let inputTokens = 0
+    let outputTokens = 0
+    let requests = 0
+    let costCents: number | null = 0
+    for (const m of stats.byModel) {
+      // Subtract subagent contribution per model to recover main-agent-only totals.
+      const subForModel = stats.subagents.filter((s) => s.model === m.model)
+      const subRequests = subForModel.reduce((s, x) => s + x.requests, 0)
+      const subInput = subForModel.reduce((s, x) => s + x.inputTokens, 0)
+      const subOutput = subForModel.reduce((s, x) => s + x.outputTokens, 0)
+      const subCacheRead = subForModel.reduce((s, x) => s + x.cacheReadTokens, 0)
+      const subCache5m = subForModel.reduce((s, x) => s + x.cacheCreate5mTokens, 0)
+      const subCache1h = subForModel.reduce((s, x) => s + x.cacheCreate1hTokens, 0)
+      const subCost = subForModel.reduce<number | null>((acc, x) => {
+        if (acc == null || x.costCents == null) return null
+        return acc + x.costCents
+      }, 0)
+
+      const mainCalls = m.calls - subRequests
+      if (mainCalls <= 0) continue
+      requests += mainCalls
+      inputTokens += m.inputTokens - subInput
+      outputTokens += m.outputTokens - subOutput
+      cacheReadTokens += m.cacheReadTokens - subCacheRead
+      cacheCreate5mTokens += m.cacheCreate5mTokens - subCache5m
+      cacheCreate1hTokens += m.cacheCreate1hTokens - subCache1h
+      if (!model) model = m.model
+      if (costCents == null || m.costCents == null) {
+        costCents = null
+      } else {
+        const cost = subCost == null ? null : m.costCents - subCost
+        if (cost == null) costCents = null
+        else costCents += cost
+      }
+    }
+    return {
+      agentId: mainAgentId,
+      agentType: 'main' as const,
+      model,
+      requests,
+      inputTokens,
+      outputTokens,
+      cacheReadTokens,
+      cacheCreate5mTokens,
+      cacheCreate1hTokens,
+      durationMs: 0,
+      toolCount: 0,
+      costCents,
+    }
+  }, [stats.byModel, stats.subagents, mainAgentId])
+
+  // Combined rows for the "Agents" table: main first, then subagents.
+  interface AgentRow {
+    agentId: string
+    agentType: string | null
+    model: string
+    requests: number
+    inputTokens: number
+    outputTokens: number
+    durationMs: number
+    toolCount: number
+    costCents: number | null
+    isMain: boolean
+  }
+  const agentRows: AgentRow[] = [
+    { ...mainAgentRow, agentType: 'main', isMain: true },
+    ...stats.subagents.map<AgentRow>((s) => ({
+      agentId: s.agentId,
+      agentType: s.agentType,
+      model: s.model,
+      requests: s.requests,
+      inputTokens: s.inputTokens,
+      outputTokens: s.outputTokens,
+      durationMs: s.durationMs,
+      toolCount: s.toolCount,
+      costCents: s.costCents,
+      isMain: false,
+    })),
+  ]
+
+  const agentCols: SortableColumn<AgentRow>[] = [
     {
       key: 'agent',
       label: 'Agent',
       sortType: 'string',
-      render: (r) => <AgentLabelByAgentId agentId={r.agentId} agents={agents} />,
-      sortValue: (r) => r.agentId,
+      render: (r) =>
+        r.isMain ? (
+          <span className="font-mono">main</span>
+        ) : (
+          <AgentNameCell
+            agentId={r.agentId}
+            agents={agents}
+            agentColorMap={agentColorMap}
+            onClick={onAgentClick}
+          />
+        ),
+      sortValue: (r) => (r.isMain ? '' : r.agentId),
     },
     {
       key: 'type',
@@ -264,7 +436,7 @@ export function TokenUsageSection({ sessionId, agents }: { sessionId: string; ag
       label: 'Duration',
       sortType: 'number',
       align: 'right',
-      render: (r) => fmtMs(r.durationMs),
+      render: (r) => (r.durationMs > 0 ? fmtMs(r.durationMs) : '—'),
       sortValue: (r) => r.durationMs,
     },
     {
@@ -272,7 +444,7 @@ export function TokenUsageSection({ sessionId, agents }: { sessionId: string; ag
       label: 'Tools',
       sortType: 'number',
       align: 'right',
-      render: (r) => fmt(r.toolCount),
+      render: (r) => (r.toolCount > 0 ? fmt(r.toolCount) : '—'),
       sortValue: (r) => r.toolCount,
     },
     {
@@ -303,7 +475,8 @@ export function TokenUsageSection({ sessionId, agents }: { sessionId: string; ag
       key: 'model',
       label: 'Model',
       sortType: 'string',
-      render: (r) => <ModelBadge modelId={r.model} pricing={stats.models[r.model]?.pricing} />,
+      render: (r) =>
+        r.model ? <ModelBadge modelId={r.model} pricing={stats.models[r.model]?.pricing} /> : '—',
       sortValue: (r) => r.model,
     },
     {
@@ -316,66 +489,111 @@ export function TokenUsageSection({ sessionId, agents }: { sessionId: string; ag
     },
   ]
 
-  const preview = (
-    <div className="space-y-3">
-      <div className="grid grid-cols-5 gap-2">
-        <Card label="Requests" value={fmt(stats.summary.totalCalls)} />
-        <Card label="Total Input" value={fmt(stats.summary.inputTotal)} />
-        <Card label="Total Output" value={fmt(stats.summary.outputTotal)} />
-        <Card
-          label="Cache Hit"
-          value={fmtPct(stats.summary.cacheHitRate)}
-          valueClass="text-green-500"
-        />
-        <Card
-          label="Est Cost"
-          value={fmtCents(stats.summary.costTotalCents)}
-          valueClass="text-amber-500"
-        />
-      </div>
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground/60 mt-2">
-        By Model
-      </div>
-      <SortableTable
-        rows={stats.byModel}
-        columns={byModelCols}
-        defaultSort={{ key: 'cost', dir: 'desc' }}
-      />
-    </div>
-  )
+  const agentTotals = {
+    durationMs: agentRows.reduce((s, a) => s + a.durationMs, 0),
+    toolCount: agentRows.reduce((s, a) => s + a.toolCount, 0),
+    requests: agentRows.reduce((s, a) => s + a.requests, 0),
+    inputTokens: agentRows.reduce((s, a) => s + a.inputTokens, 0),
+    outputTokens: agentRows.reduce((s, a) => s + a.outputTokens, 0),
+    costCents: agentRows.some((a) => a.costCents == null)
+      ? null
+      : agentRows.reduce((s, a) => s + (a.costCents ?? 0), 0),
+  }
 
-  const details = (
-    <div className="space-y-4">
-      <div>
-        <div className="text-[10px] uppercase tracking-wider text-muted-foreground/60 mb-1">
-          By Prompt
+  return (
+    <SectionShell title="Token Usage">
+      <div className="space-y-4">
+        <div className="grid grid-cols-5 gap-2">
+          <Card label="Requests" value={fmt(stats.summary.totalCalls)} />
+          <Card label="Total Input" value={fmt(stats.summary.inputTotal)} />
+          <Card label="Total Output" value={fmt(stats.summary.outputTotal)} />
+          <Card
+            label="Cache Hit"
+            value={fmtPct(stats.summary.cacheHitRate)}
+            valueClass="text-green-500"
+          />
+          <Card
+            label="Est Cost"
+            value={fmtCents(stats.summary.costTotalCents)}
+            valueClass="text-amber-500"
+          />
         </div>
-        {stats.prompts.length === 0 ? (
-          <div className="text-xs text-muted-foreground italic">No prompts in this session.</div>
-        ) : (
+
+        <div>
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground/60 mb-1">
+            By Model
+          </div>
           <SortableTable
-            rows={stats.prompts}
-            columns={promptCols}
+            rows={stats.byModel}
+            columns={byModelCols}
             defaultSort={{ key: 'cost', dir: 'desc' }}
           />
-        )}
-      </div>
-      <div>
-        <div className="text-[10px] uppercase tracking-wider text-muted-foreground/60 mb-1">
-          Subagents
         </div>
-        {stats.subagents.length === 0 ? (
-          <div className="text-xs text-muted-foreground italic">No subagents in this session.</div>
-        ) : (
+
+        <div>
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground/60 mb-1">
+            By Prompt
+          </div>
+          {stats.prompts.length === 0 ? (
+            <div className="text-xs text-muted-foreground italic">No prompts in this session.</div>
+          ) : (
+            <>
+              <SortableTable
+                rows={stats.prompts}
+                columns={promptCols}
+                defaultSort={{ key: 'cost', dir: 'desc' }}
+              />
+              <table className="w-full text-xs font-mono border-t border-border/40 mt-px">
+                <tbody>
+                  <tr className="text-muted-foreground">
+                    <td className="py-1 px-2 uppercase text-[9px] tracking-wide">Total</td>
+                    <td className="py-1 px-2 text-right">{fmtMs(promptTotals.durationMs)}</td>
+                    <td className="py-1 px-2 text-right">{fmt(promptTotals.toolCount)}</td>
+                    <td className="py-1 px-2 text-right">{fmt(promptTotals.requests)}</td>
+                    <td className="py-1 px-2 text-right">{fmt(promptTotals.inputTokens)}</td>
+                    <td className="py-1 px-2 text-right">{fmt(promptTotals.outputTokens)}</td>
+                    <td className="py-1 px-2"></td>
+                    <td className="py-1 px-2 text-right text-amber-500">
+                      {fmtCents(promptTotals.costCents)}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </>
+          )}
+        </div>
+
+        <div>
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground/60 mb-1">
+            Agents
+          </div>
           <SortableTable
-            rows={stats.subagents}
-            columns={subagentCols}
+            rows={agentRows}
+            columns={agentCols}
             defaultSort={{ key: 'cost', dir: 'desc' }}
           />
-        )}
+          <table className="w-full text-xs font-mono border-t border-border/40 mt-px">
+            <tbody>
+              <tr className="text-muted-foreground">
+                <td className="py-1 px-2 uppercase text-[9px] tracking-wide" colSpan={2}>
+                  Total
+                </td>
+                <td className="py-1 px-2 text-right">
+                  {agentTotals.durationMs > 0 ? fmtMs(agentTotals.durationMs) : '—'}
+                </td>
+                <td className="py-1 px-2 text-right">{fmt(agentTotals.toolCount)}</td>
+                <td className="py-1 px-2 text-right">{fmt(agentTotals.requests)}</td>
+                <td className="py-1 px-2 text-right">{fmt(agentTotals.inputTokens)}</td>
+                <td className="py-1 px-2 text-right">{fmt(agentTotals.outputTokens)}</td>
+                <td className="py-1 px-2"></td>
+                <td className="py-1 px-2 text-right text-amber-500">
+                  {fmtCents(agentTotals.costCents)}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
-    </div>
+    </SectionShell>
   )
-
-  return <CollapsibleSection title="Token Usage" preview={preview} details={details} />
 }

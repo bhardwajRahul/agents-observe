@@ -489,6 +489,15 @@ interface AgentTokenUsage {
   } | null
 }
 
+export interface ToolStat {
+  name: string
+  count: number
+  /** Duration stats from paired PreToolUse → PostToolUse events. null when no completion was captured. */
+  minMs: number | null
+  medianMs: number | null
+  maxMs: number | null
+}
+
 interface SessionStatsData {
   duration: string
   totalEvents: number
@@ -499,9 +508,12 @@ interface SessionStatsData {
   permissionRequests: number
   permissionDenials: number
   toolSuccessRate: string
-  topTools: { name: string; count: number }[]
+  /** All tools sorted by count desc, with duration stats per tool. */
+  tools: ToolStat[]
   longestToolCall: { tool: string; durationMs: number } | null
   filesTouched: number
+  filesRead: number
+  filesEdited: number
   turns: number
   agentUsage: AgentTokenUsage[]
   totalTokens: { input: number; output: number; cacheRead: number; cacheCreation: number }
@@ -519,9 +531,12 @@ function computeStats(events: ParsedEvent[]): SessionStatsData {
   let turns = 0
 
   const toolCounts = new Map<string, number>()
+  const toolDurations = new Map<string, number[]>()
   const preToolTimestamps = new Map<string, { tool: string; timestamp: number }>()
   let longestToolCall: { tool: string; durationMs: number } | null = null
   const filesSet = new Set<string>()
+  const filesReadSet = new Set<string>()
+  const filesEditedSet = new Set<string>()
 
   const firstTs = events.length > 0 ? events[0].timestamp : 0
   const lastTs = events.length > 0 ? events[events.length - 1].timestamp : 0
@@ -546,10 +561,15 @@ function computeStats(events: ParsedEvent[]): SessionStatsData {
         preToolTimestamps.set(toolUseId, { tool, timestamp: e.timestamp })
       }
 
-      // Track files from tool inputs
+      // Track files from tool inputs. Read tool → filesRead; Edit/Write → filesEdited.
+      // The generic filesSet keeps backward compat for any callers that still read it.
       if (input?.tool_input) {
         const ti = input.tool_input
-        if (typeof ti.file_path === 'string') filesSet.add(ti.file_path)
+        if (typeof ti.file_path === 'string') {
+          filesSet.add(ti.file_path)
+          if (tool === 'Read') filesReadSet.add(ti.file_path)
+          if (tool === 'Edit' || tool === 'Write') filesEditedSet.add(ti.file_path)
+        }
         if (typeof ti.path === 'string') filesSet.add(ti.path)
         if (typeof ti.pattern === 'string' && ti.path) filesSet.add(ti.path)
       }
@@ -567,6 +587,10 @@ function computeStats(events: ParsedEvent[]): SessionStatsData {
           if (!longestToolCall || duration > longestToolCall.durationMs) {
             longestToolCall = { tool: pre.tool, durationMs: duration }
           }
+          // Track every duration per tool so we can compute min/median/max.
+          const arr = toolDurations.get(pre.tool) ?? []
+          arr.push(duration)
+          toolDurations.set(pre.tool, arr)
         }
       }
     }
@@ -662,11 +686,25 @@ function computeStats(events: ParsedEvent[]): SessionStatsData {
   const toolSuccessRate =
     totalCompleted > 0 ? `${Math.round((postToolUseCount / totalCompleted) * 100)}%` : '—'
 
-  // Top tools sorted by count
-  const topTools = [...toolCounts.entries()]
+  // All tools sorted by count desc, with min/median/max durations
+  // computed from paired Pre/Post events. Tools with no completion
+  // captured have null duration fields.
+  function median(sorted: number[]): number {
+    const mid = Math.floor(sorted.length / 2)
+    return sorted.length % 2 === 0 ? Math.round((sorted[mid - 1] + sorted[mid]) / 2) : sorted[mid]
+  }
+  const tools: ToolStat[] = [...toolCounts.entries()]
     .sort((a, b) => b[1] - a[1])
-    .slice(0, 8)
-    .map(([name, count]) => ({ name, count }))
+    .map(([name, count]) => {
+      const durs = (toolDurations.get(name) ?? []).slice().sort((a, b) => a - b)
+      return {
+        name,
+        count,
+        minMs: durs.length > 0 ? durs[0] : null,
+        medianMs: durs.length > 0 ? median(durs) : null,
+        maxMs: durs.length > 0 ? durs[durs.length - 1] : null,
+      }
+    })
 
   return {
     duration,
@@ -678,9 +716,11 @@ function computeStats(events: ParsedEvent[]): SessionStatsData {
     permissionRequests,
     permissionDenials,
     toolSuccessRate,
-    topTools,
+    tools,
     longestToolCall,
     filesTouched: filesSet.size,
+    filesRead: filesReadSet.size,
+    filesEdited: filesEditedSet.size,
     turns,
     agentUsage,
     totalTokens,
@@ -694,6 +734,9 @@ function formatDuration(ms: number): string {
 }
 
 function SessionStats({ sessionId }: { sessionId: string }) {
+  const setEditingSessionId = useUIStore((s) => s.setEditingSessionId)
+  const setScrollToEventId = useUIStore((s) => s.setScrollToEventId)
+
   // Stats is a point-in-time snapshot — no benefit to refetching while
   // the user looks at numbers that won't change on this view. gcTime:0
   // mirrors useEvents' deliberate "drop large payloads as soon as
@@ -710,6 +753,31 @@ function SessionStats({ sessionId }: { sessionId: string }) {
   const agents = useAgents(sessionId, events)
 
   const stats = useMemo(() => (events ? computeStats(events) : null), [events])
+
+  // Click handlers for agent / prompt rows — close the modal and scroll
+  // the event stream to the relevant event.
+  const scrollToAgent = (agentId: string) => {
+    if (!events) return
+    const first = events.find((e) => e.agentId === agentId)
+    if (!first) return
+    setScrollToEventId(first.id)
+    setEditingSessionId(null)
+  }
+  const scrollToPrompt = (promptText: string, promptTimestamp: number) => {
+    if (!events) return
+    // Match by prompt text + closest timestamp. Falls back to text-only.
+    const ups = events.filter(
+      (e) => e.hookName === 'UserPromptSubmit' && (e.payload as any)?.prompt === promptText,
+    )
+    if (ups.length === 0) return
+    const closest = ups.reduce((best, e) =>
+      Math.abs(e.timestamp - promptTimestamp) < Math.abs(best.timestamp - promptTimestamp)
+        ? e
+        : best,
+    )
+    setScrollToEventId(closest.id)
+    setEditingSessionId(null)
+  }
 
   if (isLoading || !stats) {
     return (
@@ -732,10 +800,11 @@ function SessionStats({ sessionId }: { sessionId: string }) {
   )
   const overviewDetails = (
     <div className="space-y-3">
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-4 gap-3">
         <StatCard label="Turns" value={stats.turns.toLocaleString()} />
         <StatCard label="Git Commits" value={stats.gitCommits.toLocaleString()} />
-        <StatCard label="Files Touched" value={stats.filesTouched.toLocaleString()} />
+        <StatCard label="Files Read" value={stats.filesRead.toLocaleString()} />
+        <StatCard label="Files Edited" value={stats.filesEdited.toLocaleString()} />
       </div>
       {(stats.permissionRequests > 0 || stats.permissionDenials > 0) && (
         <div>
@@ -751,27 +820,29 @@ function SessionStats({ sessionId }: { sessionId: string }) {
     </div>
   )
 
-  // Tool Usage preview: top tools bar chart + longest tool call.
+  // Tool Usage preview: top 6 tools as bar chart + longest tool call.
   const toolUsagePreview = (
     <div className="space-y-2">
-      {stats.topTools.length > 0 && (
+      {stats.tools.length > 0 && (
         <div>
           <div className="text-[10px] uppercase tracking-wider text-muted-foreground/60 mb-1.5">
             Top Tools
           </div>
           <div className="space-y-1">
-            {stats.topTools.slice(0, 6).map(({ name, count }) => {
+            {stats.tools.slice(0, 6).map(({ name, count }) => {
               const pct = stats.toolCalls > 0 ? (count / stats.toolCalls) * 100 : 0
               return (
                 <div key={name} className="flex items-center gap-2">
-                  <span className="w-20 truncate text-muted-foreground">{name}</span>
+                  <span className="w-24 truncate text-muted-foreground">{name}</span>
                   <div className="flex-1 h-3 rounded-full bg-muted/50 overflow-hidden">
                     <div
                       className="h-full rounded-full bg-primary/40"
                       style={{ width: `${pct}%` }}
                     />
                   </div>
-                  <span className="w-8 text-right text-muted-foreground/70">{count}</span>
+                  <span className="w-12 text-right text-muted-foreground/70 font-mono">
+                    {count}
+                  </span>
                 </div>
               )
             })}
@@ -791,26 +862,68 @@ function SessionStats({ sessionId }: { sessionId: string }) {
       )}
     </div>
   )
-  const toolUsageDetails =
-    stats.topTools.length > 6 ? (
-      <div className="space-y-1">
-        <div className="text-[10px] uppercase tracking-wider text-muted-foreground/60 mb-1.5">
-          All Tools
-        </div>
-        {stats.topTools.slice(6).map(({ name, count }) => {
-          const pct = stats.toolCalls > 0 ? (count / stats.toolCalls) * 100 : 0
-          return (
-            <div key={name} className="flex items-center gap-2">
-              <span className="w-20 truncate text-muted-foreground">{name}</span>
-              <div className="flex-1 h-3 rounded-full bg-muted/50 overflow-hidden">
-                <div className="h-full rounded-full bg-primary/40" style={{ width: `${pct}%` }} />
-              </div>
-              <span className="w-8 text-right text-muted-foreground/70">{count}</span>
-            </div>
-          )
-        })}
+  // Expanded: full table with Graph | Count | Min | Median | Max for
+  // every tool used in the session.
+  const toolUsageDetails = (
+    <div>
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground/60 mb-1.5">
+        All Tools
       </div>
-    ) : null
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="text-muted-foreground border-b border-border">
+            <th className="text-left font-normal py-1.5 px-2">Tool</th>
+            <th className="text-left font-normal py-1.5 px-2 w-2/5">Graph</th>
+            <th className="text-right font-normal py-1.5 px-2">Count</th>
+            <th
+              className="text-right font-normal py-1.5 px-2 border-l border-border/30"
+              colSpan={3}
+            >
+              <span className="text-[9px] uppercase tracking-wide">Duration (ms)</span>
+            </th>
+          </tr>
+          <tr className="text-muted-foreground/70 border-b border-border">
+            <th></th>
+            <th></th>
+            <th></th>
+            <th className="text-right font-normal text-[10px] py-1 px-2 border-l border-border/30">
+              Min
+            </th>
+            <th className="text-right font-normal text-[10px] py-1 px-2">Median</th>
+            <th className="text-right font-normal text-[10px] py-1 px-2">Max</th>
+          </tr>
+        </thead>
+        <tbody className="font-mono">
+          {stats.tools.map((t) => {
+            const pct = stats.toolCalls > 0 ? (t.count / stats.toolCalls) * 100 : 0
+            return (
+              <tr key={t.name} className="border-b border-border/40">
+                <td className="py-1 px-2 text-foreground truncate max-w-[140px]">{t.name}</td>
+                <td className="py-1 px-2">
+                  <div className="h-2.5 rounded-full bg-muted/50 overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-primary/40"
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                </td>
+                <td className="py-1 px-2 text-right text-muted-foreground">{t.count}</td>
+                <td className="py-1 px-2 text-right text-muted-foreground border-l border-border/30">
+                  {t.minMs == null ? '—' : t.minMs.toLocaleString()}
+                </td>
+                <td className="py-1 px-2 text-right text-muted-foreground">
+                  {t.medianMs == null ? '—' : t.medianMs.toLocaleString()}
+                </td>
+                <td className="py-1 px-2 text-right text-muted-foreground">
+                  {t.maxMs == null ? '—' : t.maxMs.toLocaleString()}
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
 
   return (
     <div className="px-5 py-4 text-xs overflow-y-auto max-h-[60vh]">
@@ -820,7 +933,13 @@ function SessionStats({ sessionId }: { sessionId: string }) {
         preview={toolUsagePreview}
         details={toolUsageDetails}
       />
-      <TokenUsageSection sessionId={sessionId} agents={agents} />
+      <TokenUsageSection
+        sessionId={sessionId}
+        mainAgentId={sessionId}
+        agents={agents}
+        onAgentClick={scrollToAgent}
+        onPromptClick={scrollToPrompt}
+      />
     </div>
   )
 }

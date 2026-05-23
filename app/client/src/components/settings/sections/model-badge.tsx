@@ -43,11 +43,19 @@ export function ModelBadge({
             {effort ? <span className="ml-1 text-[9px] text-slate-300">{effort}</span> : null}
           </span>
         </TooltipTrigger>
-        <TooltipContent side="bottom" align="start" className="max-w-xs">
-          <div className="font-mono text-[11px] text-foreground mb-1">{modelId}</div>
+        <TooltipContent
+          side="bottom"
+          align="start"
+          // Override the default `bg-primary text-primary-foreground` (which
+          // is designed for short label tooltips) with a popover treatment
+          // that respects the theme and has enough surface area for our
+          // multi-line pricing table.
+          className="!bg-popover !text-popover-foreground border border-border max-w-xs p-3 shadow-md"
+        >
+          <div className="font-mono text-[11px] text-foreground mb-1 break-all">{modelId}</div>
           {effort && (
             <div className="text-[10px] text-muted-foreground mb-2">
-              Reasoning effort: <span className="text-slate-300">{effort}</span>
+              Reasoning effort: <span className="text-foreground">{effort}</span>
             </div>
           )}
           {pricing ? (
@@ -59,23 +67,27 @@ export function ModelBadge({
                 <tbody>
                   <tr>
                     <td className="text-muted-foreground py-0.5">Input</td>
-                    <td className="text-right">{fmtUsd(pricing.inputPerM)}</td>
+                    <td className="text-right text-foreground">{fmtUsd(pricing.inputPerM)}</td>
                   </tr>
                   <tr>
                     <td className="text-muted-foreground py-0.5">Output</td>
-                    <td className="text-right">{fmtUsd(pricing.outputPerM)}</td>
+                    <td className="text-right text-foreground">{fmtUsd(pricing.outputPerM)}</td>
                   </tr>
                   <tr>
                     <td className="text-muted-foreground py-0.5">Cache read</td>
-                    <td className="text-right">{fmtUsd(pricing.cacheReadPerM)}</td>
+                    <td className="text-right text-foreground">{fmtUsd(pricing.cacheReadPerM)}</td>
                   </tr>
                   <tr>
                     <td className="text-muted-foreground py-0.5">Cache write (5m)</td>
-                    <td className="text-right">{fmtUsd(pricing.cacheCreate5mPerM)}</td>
+                    <td className="text-right text-foreground">
+                      {fmtUsd(pricing.cacheCreate5mPerM)}
+                    </td>
                   </tr>
                   <tr>
                     <td className="text-muted-foreground py-0.5">Cache write (1h)</td>
-                    <td className="text-right">{fmtUsd(pricing.cacheCreate1hPerM)}</td>
+                    <td className="text-right text-foreground">
+                      {fmtUsd(pricing.cacheCreate1hPerM)}
+                    </td>
                   </tr>
                 </tbody>
               </table>
