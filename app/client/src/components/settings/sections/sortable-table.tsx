@@ -17,6 +17,13 @@ export interface SortableTableProps<T> {
   rows: T[]
   columns: SortableColumn<T>[]
   defaultSort: { key: string; dir: 'asc' | 'desc' }
+  /**
+   * Optional footer row rendered as a `<tfoot>` inside the same
+   * table so columns line up with the data rows. The array is
+   * keyed by column order (one ReactNode per column, in the same
+   * order as `columns`). Use `null` for cells you want empty.
+   */
+  footer?: (ReactNode | null)[]
 }
 
 /**
@@ -25,7 +32,12 @@ export interface SortableTableProps<T> {
  * the sort there in its default direction (desc for number, asc for
  * string).
  */
-export function SortableTable<T>({ rows, columns, defaultSort }: SortableTableProps<T>) {
+export function SortableTable<T>({
+  rows,
+  columns,
+  defaultSort,
+  footer,
+}: SortableTableProps<T>) {
   const [sort, setSort] = useState(defaultSort)
 
   const sortedRows = useMemo(() => {
@@ -95,6 +107,24 @@ export function SortableTable<T>({ rows, columns, defaultSort }: SortableTablePr
           </tr>
         ))}
       </tbody>
+      {footer && (
+        <tfoot className="font-mono">
+          <tr className="border-t border-border text-muted-foreground">
+            {columns.map((col, i) => (
+              <td
+                key={col.key}
+                className={cn(
+                  'py-1.5 px-2',
+                  col.align === 'right' && 'text-right',
+                  col.className,
+                )}
+              >
+                {footer[i] ?? ''}
+              </td>
+            ))}
+          </tr>
+        </tfoot>
+      )}
     </table>
   )
 }

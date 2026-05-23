@@ -225,6 +225,12 @@ function aggregatePrompts(
       i + 1 < sortedPromptIds.length ? promptsIndex[sortedPromptIds[i + 1]].timestamp : null
     const durationMs = nextTimestamp ? nextTimestamp - promptMeta.timestamp : null
 
+    // Skip prompts that produced no LLM activity. These are Claude's
+    // internal command caveats (<local-command-caveat>, etc.) that get
+    // injected as user-line prompts but never reach the model. They
+    // clutter the table with 0-everything rows.
+    if (calls.length === 0) continue
+
     out.push({
       promptId,
       text: promptMeta.text,

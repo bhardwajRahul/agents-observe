@@ -740,29 +740,22 @@ export function TokenUsageSection({
           {stats.prompts.length === 0 ? (
             <div className="text-xs text-muted-foreground italic">No prompts in this session.</div>
           ) : (
-            <>
-              <SortableTable
-                rows={stats.prompts}
-                columns={promptCols}
-                defaultSort={{ key: 'cost', dir: 'desc' }}
-              />
-              <table className="w-full text-xs font-mono border-t border-border/40 mt-px">
-                <tbody>
-                  <tr className="text-muted-foreground">
-                    <td className="py-1 px-2 uppercase text-[9px] tracking-wide">Total</td>
-                    <td className="py-1 px-2 text-right">{fmtMs(promptTotals.durationMs)}</td>
-                    <td className="py-1 px-2 text-right">{fmt(promptTotals.toolCount)}</td>
-                    <td className="py-1 px-2 text-right">{fmt(promptTotals.requests)}</td>
-                    <td className="py-1 px-2 text-right">{fmt(promptTotals.inputTokens)}</td>
-                    <td className="py-1 px-2 text-right">{fmt(promptTotals.outputTokens)}</td>
-                    <td className="py-1 px-2"></td>
-                    <td className="py-1 px-2 text-right text-amber-500">
-                      {fmtCents(promptTotals.costCents)}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </>
+            <SortableTable
+              rows={stats.prompts}
+              columns={promptCols}
+              defaultSort={{ key: 'cost', dir: 'desc' }}
+              // Footer cells match promptCols order: Prompt · Duration · Tools · Requests · Input · Output · Model · Est Cost.
+              footer={[
+                <span className="uppercase text-[9px] tracking-wide">Total</span>,
+                fmtMs(promptTotals.durationMs),
+                fmt(promptTotals.toolCount),
+                fmt(promptTotals.requests),
+                fmt(promptTotals.inputTokens),
+                fmt(promptTotals.outputTokens),
+                null,
+                <span className="text-amber-500">{fmtCents(promptTotals.costCents)}</span>,
+              ]}
+            />
           )}
         </div>
 
@@ -774,27 +767,19 @@ export function TokenUsageSection({
             rows={agentRows}
             columns={agentCols}
             defaultSort={{ key: 'cost', dir: 'desc' }}
+            // Footer cells match agentCols order: Agent · Type · Duration · Tools · Requests · Input · Output · Model · Est Cost.
+            footer={[
+              <span className="uppercase text-[9px] tracking-wide">Total</span>,
+              null,
+              agentTotals.durationMs > 0 ? fmtMs(agentTotals.durationMs) : '—',
+              fmt(agentTotals.toolCount),
+              fmt(agentTotals.requests),
+              fmt(agentTotals.inputTokens),
+              fmt(agentTotals.outputTokens),
+              null,
+              <span className="text-amber-500">{fmtCents(agentTotals.costCents)}</span>,
+            ]}
           />
-          <table className="w-full text-xs font-mono border-t border-border/40 mt-px">
-            <tbody>
-              <tr className="text-muted-foreground">
-                <td className="py-1 px-2 uppercase text-[9px] tracking-wide" colSpan={2}>
-                  Total
-                </td>
-                <td className="py-1 px-2 text-right">
-                  {agentTotals.durationMs > 0 ? fmtMs(agentTotals.durationMs) : '—'}
-                </td>
-                <td className="py-1 px-2 text-right">{fmt(agentTotals.toolCount)}</td>
-                <td className="py-1 px-2 text-right">{fmt(agentTotals.requests)}</td>
-                <td className="py-1 px-2 text-right">{fmt(agentTotals.inputTokens)}</td>
-                <td className="py-1 px-2 text-right">{fmt(agentTotals.outputTokens)}</td>
-                <td className="py-1 px-2"></td>
-                <td className="py-1 px-2 text-right text-amber-500">
-                  {fmtCents(agentTotals.costCents)}
-                </td>
-              </tr>
-            </tbody>
-          </table>
         </div>
       </div>
     </SectionShell>
