@@ -115,6 +115,98 @@ describe('parseClaudeSession — main only', () => {
     expect(result.subagents).toHaveLength(0)
     expect(result.errors).toHaveLength(0)
   })
+
+  test('lastTimestampByPromptId records the latest line attributable to each prompt', async () => {
+    const result = await parseClaudeSession(FIXTURE_PATH, [])
+    // The fixture's last line for p1 is the tool_result user message at
+    // 2026-05-22T00:00:02.000Z. parseClaudeSession should attribute that
+    // (via parentUuid chain) back to p1.
+    const expectedLastTs = Date.parse('2026-05-22T00:00:02.000Z')
+    expect(result.lastTimestampByPromptId.p1).toBe(expectedLastTs)
+  })
+
+  test('lastTimestampByPromptId walks multi-hop parentUuid chains', async () => {
+    // Fixture path: user(p1) → attachment → assistant(as1a) → assistant(as1b) → user(tool_result).
+    // The deepest descendant must still attribute back to p1. The latest
+    // descendant's timestamp must dominate over earlier ones.
+    const result = await parseClaudeSession(FIXTURE_PATH, [])
+    expect(result.lastTimestampByPromptId.p1).toBeGreaterThan(
+      Date.parse('2026-05-22T00:00:01.500Z'), // beats the last assistant ts
+    )
+  })
+
+  test('multi-prompt fixture: each prompt has its own last-timestamp, idle gaps do not bleed', async () => {
+    // Build a fixture with two prompts: p1 finishes at T+10s, then a
+    // 600s idle window, then p2 at T+610s with its own short activity.
+    const lines = [
+      {
+        type: 'user',
+        uuid: 'u1',
+        parentUuid: null,
+        promptId: 'p1',
+        sessionId: 's',
+        timestamp: '2026-06-01T00:00:00.000Z',
+        message: { content: 'first prompt' },
+      },
+      {
+        type: 'assistant',
+        uuid: 'a1',
+        parentUuid: 'u1',
+        sessionId: 's',
+        timestamp: '2026-06-01T00:00:10.000Z',
+        isSidechain: false,
+        message: {
+          id: 'm1',
+          model: 'claude-opus-4-7',
+          stop_reason: 'end_turn',
+          usage: {},
+          content: [],
+        },
+      },
+      // 10 minutes of idle time…
+      {
+        type: 'user',
+        uuid: 'u2',
+        parentUuid: null,
+        promptId: 'p2',
+        sessionId: 's',
+        timestamp: '2026-06-01T00:10:10.000Z',
+        message: { content: 'second prompt' },
+      },
+      {
+        type: 'assistant',
+        uuid: 'a2',
+        parentUuid: 'u2',
+        sessionId: 's',
+        timestamp: '2026-06-01T00:10:13.000Z',
+        isSidechain: false,
+        message: {
+          id: 'm2',
+          model: 'claude-opus-4-7',
+          stop_reason: 'end_turn',
+          usage: {},
+          content: [],
+        },
+      },
+    ]
+    const path = join(TMP_DIR, 'multi.jsonl')
+    writeFileSync(path, lines.map((l) => JSON.stringify(l)).join('\n') + '\n')
+
+    const result = await parseClaudeSession(path, [])
+
+    // p1's last activity must be its OWN assistant call (T+10s), not
+    // anything from p2's window — even though p2's lines exist later
+    // in the same file.
+    expect(result.lastTimestampByPromptId.p1).toBe(Date.parse('2026-06-01T00:00:10.000Z'))
+    // p2's last activity is its own assistant call at T+613s, not the
+    // session's tail.
+    expect(result.lastTimestampByPromptId.p2).toBe(Date.parse('2026-06-01T00:10:13.000Z'))
+
+    // Sanity: the idle gap between prompts (600s) is NOT included in
+    // p1's activity span.
+    const p1Span = result.lastTimestampByPromptId.p1 - Date.parse('2026-06-01T00:00:00.000Z')
+    expect(p1Span).toBe(10_000)
+  })
 })
 
 function writeSubagent(

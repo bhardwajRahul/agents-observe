@@ -167,8 +167,20 @@ export function getConfig(overrides = {}) {
     /* Test harness only — skip `docker pull` when image is pre-loaded. See docs/plans/_queued/spec-fresh-install-test-harness.md */
     testSkipPull: overrides.testSkipPull || process.env.AGENTS_OBSERVE_TEST_SKIP_PULL === '1',
 
-    /** When true, the server exposes /api/sessions/:id/transcript-stats and (in docker mode) the container bind-mounts ~/.claude/projects read-only. */
+    /** When true, the server exposes /api/sessions/:id/transcript-stats and (in docker mode) the container bind-mounts each agent class's session dir read-only. */
     transcriptStatsEnabled: process.env.AGENTS_OBSERVE_TRANSCRIPT_STATS === '1',
+
+    /**
+     * Host paths to bind-mount when transcript stats are enabled. One
+     * pair per agent class. Defaults assume the standard CLI install
+     * locations (~/.claude/projects, ~/.codex/sessions). Users with
+     * non-standard installs can override either via env vars.
+     */
+    transcriptClaudeHost:
+      process.env.AGENTS_OBSERVE_TRANSCRIPT_CLAUDE_HOST_BASE ||
+      resolve(homeDir, '.claude/projects'),
+    transcriptCodexHost:
+      process.env.AGENTS_OBSERVE_TRANSCRIPT_CODEX_HOST_BASE || resolve(homeDir, '.codex/sessions'),
 
     serverPortFile,
 
@@ -200,10 +212,18 @@ export function getServerEnv(config) {
     ...(config.isDevRuntime && { AGENTS_OBSERVE_DEV_CLIENT_PORT: config.clientPort }),
     AGENTS_OBSERVE_STORAGE_ADAPTER: 'sqlite',
     AGENTS_OBSERVE_TRANSCRIPT_STATS: config.transcriptStatsEnabled ? '1' : '',
-    AGENTS_OBSERVE_TRANSCRIPT_HOST_BASE:
-      isDocker && config.transcriptStatsEnabled ? resolve(config.homeDir, '.claude/projects') : '',
-    AGENTS_OBSERVE_TRANSCRIPT_CONTAINER_BASE:
+    // Per-agent-class bind mounts. Host paths are user-overridable (in
+    // case CLI install lives somewhere non-default); container paths
+    // are fixed because docker.mjs only knows to mount these specific
+    // container-side locations.
+    AGENTS_OBSERVE_TRANSCRIPT_CLAUDE_HOST_BASE:
+      isDocker && config.transcriptStatsEnabled ? config.transcriptClaudeHost : '',
+    AGENTS_OBSERVE_TRANSCRIPT_CLAUDE_CONTAINER_BASE:
       isDocker && config.transcriptStatsEnabled ? '/host/.claude/projects' : '',
+    AGENTS_OBSERVE_TRANSCRIPT_CODEX_HOST_BASE:
+      isDocker && config.transcriptStatsEnabled ? config.transcriptCodexHost : '',
+    AGENTS_OBSERVE_TRANSCRIPT_CODEX_CONTAINER_BASE:
+      isDocker && config.transcriptStatsEnabled ? '/host/.codex/sessions' : '',
   }
 }
 

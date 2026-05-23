@@ -179,7 +179,7 @@ function CostCell({
   )
 }
 
-function fmtMs(ms: number): string {
+export function fmtMs(ms: number): string {
   if (ms < 1000) return `${ms}ms`
   if (ms < 60_000) return `${(ms / 1000).toFixed(0)}s`
   if (ms < 3_600_000) {
@@ -811,7 +811,7 @@ export function TokenUsageSection({
 
 // ── Agent rows: events as baseline, transcripts as augmentation ────
 
-interface AgentRow {
+export interface AgentRow {
   agentId: string
   agentType: string | null
   isMain: boolean
@@ -834,7 +834,7 @@ interface AgentRow {
   costCents: number | null
 }
 
-interface AgentTotals {
+export interface AgentTotals {
   durationMs: number
   toolCount: number
   requests: number | null
@@ -849,7 +849,7 @@ interface AgentTotals {
  * fields they actually have data for — empty transcript fields leave
  * the events-derived values in place.
  */
-function buildAgentsTable({
+export function buildAgentsTable({
   mainAgentId,
   sessionDurationMs,
   mainAgentToolCount,

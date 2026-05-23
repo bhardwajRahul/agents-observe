@@ -742,7 +742,7 @@ function computeStats(events: ParsedEvent[], sessionId: string): SessionStatsDat
   }
 }
 
-function formatDuration(ms: number): string {
+export function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`
   if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`
   if (ms < 3_600_000) {

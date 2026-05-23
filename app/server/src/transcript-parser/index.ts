@@ -9,6 +9,7 @@ import type {
   TranscriptUsage,
 } from './types'
 import { parseClaudeSession } from './agents/claude'
+import { parseCodexSession } from './agents/codex'
 import { getModelsPricing, type ModelPricing } from './models-pricing'
 
 export type { TranscriptStatsV2 } from './types'
@@ -28,23 +29,45 @@ export async function parseSessionTranscripts(
   const agents = (await store.getAgentsForSession(sessionId)) ?? []
   const errors: TranscriptParseError[] = []
 
-  // Group by agent_class for dispatch. v1: claude-code only.
-  const claudeAgents = agents.filter((a: any) => (a.agent_class ?? 'claude-code') === 'claude-code')
-  const otherAgents = agents.filter((a: any) => (a.agent_class ?? 'claude-code') !== 'claude-code')
+  // Identify the main agent's class. The session's main agent has
+  // the same id as the session — anything else is a subagent. Fall
+  // back to claude-code for missing class data (pre-codex sessions
+  // wouldn't have it populated).
+  const mainAgent = agents.find((a: any) => a.id === sessionId)
+  const mainAgentClass = (mainAgent as any)?.agent_class ?? 'claude-code'
 
-  for (const a of otherAgents) {
+  // Only claude-code records spawn subagents in their own jsonls;
+  // for codex sessions this list is empty (the parser ignores it anyway).
+  const subagentIds = agents
+    .filter((a: any) => (a.agent_class ?? 'claude-code') === 'claude-code')
+    .map((a: any) => a.id as string)
+    .filter((id) => id !== sessionId)
+
+  let result
+  if (mainAgentClass === 'claude-code') {
+    result = await parseClaudeSession(containerTranscriptPath, subagentIds)
+  } else if (mainAgentClass === 'codex') {
+    result = await parseCodexSession(containerTranscriptPath, [])
+  } else {
     errors.push({
       scope: 'main',
-      agentId: a.id,
+      agentId: sessionId,
       code: 'parse_error',
-      message: `Agent class "${a.agent_class}" not supported for transcript stats yet.`,
+      message: `Agent class "${mainAgentClass}" not supported for transcript stats yet.`,
     })
+    // Return an empty stats shape rather than throwing — the route
+    // turns this into a normal 200 with empty tables + the error in
+    // `errors[]`, which is how the UI handles non-supported classes.
+    return {
+      source: 'jsonl',
+      summary: { totalCalls: 0, inputTotal: 0, outputTotal: 0, cacheHitRate: 0, costTotalCents: 0 },
+      byModel: [],
+      prompts: [],
+      subagents: [],
+      models: {},
+      errors,
+    }
   }
-
-  // The session's main agent has the same id as the session. Anything else is a subagent.
-  const subagentIds = claudeAgents.map((a: any) => a.id as string).filter((id) => id !== sessionId)
-
-  const result = await parseClaudeSession(containerTranscriptPath, subagentIds)
   errors.push(...result.errors)
 
   const pricingMap = await getModelsPricing()

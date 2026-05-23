@@ -6,14 +6,21 @@ import { join } from 'node:path'
 import type { EventStore } from '../storage/types'
 
 // Use vi.hoisted so the mocked config object is mutable across tests.
+// dataDir is required for the pricing module's disk cache; share one
+// tmp dir across the suite.
+const sharedTmpDir = vi.hoisted(() => {
+  const fs = require('node:fs') as typeof import('node:fs')
+  const os = require('node:os') as typeof import('node:os')
+  const path = require('node:path') as typeof import('node:path')
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'transcript-stats-route-'))
+})
 const transcriptConfig = vi.hoisted(() => ({
   enabled: true,
-  hostBase: '',
-  containerBase: '',
+  bases: [] as Array<{ agentClass: string; host: string; container: string }>,
   maxFileBytes: 100 * 1024 * 1024,
 }))
 vi.mock('../config', () => ({
-  config: { transcriptStats: transcriptConfig },
+  config: { transcriptStats: transcriptConfig, dataDir: sharedTmpDir },
 }))
 
 // Import after the mock is set up.
@@ -77,8 +84,7 @@ function writeFixture(): string {
 describe('GET /api/sessions/:sessionId/transcript-stats', () => {
   beforeEach(() => {
     transcriptConfig.enabled = true
-    transcriptConfig.hostBase = ''
-    transcriptConfig.containerBase = ''
+    transcriptConfig.bases = []
     transcriptConfig.maxFileBytes = 100 * 1024 * 1024
     // Mock models.dev fetch so pricing resolves deterministically.
     vi.stubGlobal(

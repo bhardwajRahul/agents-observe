@@ -2,18 +2,26 @@ import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/comp
 import type { TranscriptStatsModelPricing } from '@/lib/api-client'
 
 /**
- * Format a model id for badge display: strip "claude-" prefix,
- * convert version dashes (4-7) to dots (4.7), strip any trailing
- * 8-digit date suffix.
+ * Format a model id for badge display.
+ *
+ * Anthropic uses dash-separated version digits (`claude-opus-4-7`) and
+ * a trailing date stamp (`-20251001`). We strip the prefix, the date,
+ * and convert the version dashes to dots so the badge reads
+ * "opus-4.7".
+ *
+ * Other providers (OpenAI's `gpt-5.4`, Meta's `llama-3.3-70b`, etc.)
+ * use whatever shape the provider chose — applying Claude's
+ * dash-to-dot rule to them would corrupt the label (e.g. "3-70b" must
+ * NOT become "3.70b"). So the regex only fires for claude- ids.
  */
 export function formatModelLabel(modelId: string): string {
-  let s = modelId
-  if (s.startsWith('claude-')) s = s.slice('claude-'.length)
-  // Strip trailing -YYYYMMDD
-  s = s.replace(/-\d{8}$/, '')
-  // Convert version dashes (digit-dash-digit) to dots.
-  s = s.replace(/(\d)-(\d)/g, '$1.$2')
-  return s
+  if (modelId.startsWith('claude-')) {
+    let s = modelId.slice('claude-'.length)
+    s = s.replace(/-\d{8}$/, '') // trailing date stamp
+    s = s.replace(/(\d)-(\d)/g, '$1.$2') // version dashes → dots
+    return s
+  }
+  return modelId
 }
 
 function fmtUsd(n: number): string {
