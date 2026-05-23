@@ -199,7 +199,7 @@ export function fmtMs(ms: number): string {
 
 const ERROR_MESSAGES: Record<TranscriptStatsErrorCode, string> = {
   disabled:
-    "Session transcript parsing isn't enabled — set AGENTS_OBSERVE_TRANSCRIPT_STATS=1 to see models and token usage.",
+    'Session transcript parsing is disabled — unset AGENTS_OBSERVE_TRANSCRIPT_STATS (or remove the =0 override) to see models and token usage.',
   no_transcript:
     'Session transcript not available — models and token usage info not available for this session.',
   file_not_found: 'Session transcript file not found — models and token usage info not available.',

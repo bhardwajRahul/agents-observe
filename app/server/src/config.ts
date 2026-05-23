@@ -66,7 +66,7 @@ export const config = {
   startupGraceMs: 60_000,
 
   transcriptStats: {
-    enabled: process.env.AGENTS_OBSERVE_TRANSCRIPT_STATS === '1',
+    enabled: process.env.AGENTS_OBSERVE_TRANSCRIPT_STATS !== '0',
     // Per-agent-class bind-mount bases. The runtime tries each pair when
     // resolving a session's transcript_path; one pair per supported
     // agent class so users can override locations independently

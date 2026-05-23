@@ -15,7 +15,7 @@ router.get('/sessions/:sessionId/transcript-stats', async (c) => {
       {
         error: 'disabled',
         message:
-          'Transcript parsing not enabled. Set AGENTS_OBSERVE_TRANSCRIPT_STATS=1 on the server.',
+          'Transcript parsing is disabled. Unset AGENTS_OBSERVE_TRANSCRIPT_STATS (or remove the =0 override) on the server to re-enable.',
       },
       404,
     )

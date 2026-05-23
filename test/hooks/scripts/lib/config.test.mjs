@@ -482,14 +482,21 @@ describe('getServerEnv — transcript-stats env vars', () => {
     delete process.env.AGENTS_OBSERVE_TRANSCRIPT_STATS
   })
 
-  it('omits transcript-stats env vars when feature disabled', async () => {
+  it('omits transcript-stats env vars when feature explicitly disabled', async () => {
+    process.env.AGENTS_OBSERVE_TRANSCRIPT_STATS = '0'
     const mod = await loadModule()
     const env = mod.getServerEnv(mod.getConfig({ runtime: 'docker' }))
-    expect(env.AGENTS_OBSERVE_TRANSCRIPT_STATS).toBe('')
+    expect(env.AGENTS_OBSERVE_TRANSCRIPT_STATS).toBe('0')
     expect(env.AGENTS_OBSERVE_TRANSCRIPT_CLAUDE_HOST_BASE).toBe('')
     expect(env.AGENTS_OBSERVE_TRANSCRIPT_CLAUDE_CONTAINER_BASE).toBe('')
     expect(env.AGENTS_OBSERVE_TRANSCRIPT_CODEX_HOST_BASE).toBe('')
     expect(env.AGENTS_OBSERVE_TRANSCRIPT_CODEX_CONTAINER_BASE).toBe('')
+  })
+
+  it('enables transcript-stats by default when env var is unset', async () => {
+    const mod = await loadModule()
+    const env = mod.getServerEnv(mod.getConfig({ runtime: 'docker' }))
+    expect(env.AGENTS_OBSERVE_TRANSCRIPT_STATS).toBe('1')
   })
 
   it('populates per-class transcript-stats env vars when feature enabled in docker', async () => {
