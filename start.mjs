@@ -25,6 +25,7 @@ const config = getConfig()
 const serverDir = resolve(config.installDir, 'app/server')
 const clientDir = resolve(config.installDir, 'app/client')
 const isDev = config.isDevRuntime
+const skipInstall = process.argv.includes('--skip-install')
 
 function run(cmd, args, cwd, env = {}) {
   const rel = cwd.replace(config.installDir + '/', '') || '.'
@@ -33,8 +34,12 @@ function run(cmd, args, cwd, env = {}) {
 }
 
 // 1. Install dependencies
-run('npm', ['install'], serverDir)
-run('npm', ['install'], clientDir)
+if (skipInstall) {
+  console.log('\nSkipping npm install (--skip-install)')
+} else {
+  run('npm', ['install'], serverDir)
+  run('npm', ['install'], clientDir)
+}
 
 // 2. Build client (skip in dev — vite serves it directly)
 if (!isDev) {
