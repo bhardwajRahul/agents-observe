@@ -33,6 +33,9 @@ export interface SortableTableProps<T> {
    *  applies to the full list before slicing, so the visible top-N
    *  reflects the active sort. */
   initialMaxRows?: number
+  /** Optional per-row class hook for de-emphasizing rows whose data
+   *  is degenerate (e.g. prompts that triggered zero LLM calls). */
+  rowClassName?: (row: T) => string
 }
 
 /**
@@ -47,6 +50,7 @@ export function SortableTable<T>({
   defaultSort,
   footer,
   initialMaxRows,
+  rowClassName,
 }: SortableTableProps<T>) {
   const [sort, setSort] = useState(defaultSort)
   const [expanded, setExpanded] = useState(false)
@@ -112,7 +116,7 @@ export function SortableTable<T>({
       </thead>
       <tbody className="font-mono">
         {visibleRows.map((row, i) => (
-          <tr key={i} className="border-b border-border/40">
+          <tr key={i} className={cn('border-b border-border/40', rowClassName?.(row))}>
             {columns.map((col) => (
               <td
                 key={col.key}

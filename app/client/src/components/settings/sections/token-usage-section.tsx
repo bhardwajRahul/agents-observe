@@ -801,6 +801,12 @@ export function TokenUsageSection({
                 columns={promptCols}
                 defaultSort={{ key: 'cost', dir: 'desc' }}
                 initialMaxRows={50}
+                // Mute prompts that didn't trigger any LLM call —
+                // compaction-orphaned "continue"s, interrupts before
+                // model emitted, etc. The text cell still respects its
+                // own event-match check (clickable when an event was
+                // captured, even within a muted row).
+                rowClassName={(r) => (r.requests === 0 ? 'opacity-50' : '')}
                 footer={[
                   <span className="uppercase text-[9px] tracking-wide">
                     Total

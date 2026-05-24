@@ -267,11 +267,12 @@ function aggregatePrompts(
     const durationMs =
       lastTs && lastTs > promptMeta.timestamp ? lastTs - promptMeta.timestamp : null
 
-    // Skip prompts that produced no LLM activity. These are Claude's
-    // internal command caveats (<local-command-caveat>, etc.) that get
-    // injected as user-line prompts but never reach the model. They
-    // clutter the table with 0-everything rows.
-    if (calls.length === 0) continue
+    // Real user-typed prompts that produced no LLM activity (the user
+    // typed "continue" right before a context compaction, pressed ESC
+    // before the model emitted anything, etc.) still get a row — the
+    // UI mutes them visually. Internal injects are already filtered
+    // upstream in parseJsonlFile, so anything that reaches here is a
+    // real prompt worth surfacing.
 
     out.push({
       promptId,
