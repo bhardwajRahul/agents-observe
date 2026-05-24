@@ -207,6 +207,62 @@ describe('parseClaudeSession — main only', () => {
     const p1Span = result.lastTimestampByPromptId.p1 - Date.parse('2026-06-01T00:00:00.000Z')
     expect(p1Span).toBe(10_000)
   })
+
+  test('skips locally-synthesized <synthetic> assistant messages (API-error placeholders)', async () => {
+    // Claude Code injects fake assistant lines with model "<synthetic>"
+    // and zero-token usage when an API call fails (policy block, socket
+    // drop, etc.). They aren't real LLM calls — including them poisons
+    // cost aggregation because <synthetic> has no models.dev pricing.
+    const lines = [
+      {
+        type: 'user',
+        uuid: 'u1',
+        parentUuid: null,
+        promptId: 'p1',
+        sessionId: 's',
+        timestamp: '2026-05-22T00:00:00.000Z',
+        message: { content: 'hi' },
+      },
+      {
+        type: 'assistant',
+        uuid: 'a1',
+        parentUuid: 'u1',
+        sessionId: 's',
+        timestamp: '2026-05-22T00:00:01.000Z',
+        isSidechain: false,
+        message: {
+          id: 'real-msg',
+          model: 'claude-opus-4-7',
+          stop_reason: 'end_turn',
+          usage: { input_tokens: 5, output_tokens: 10 },
+          content: [{ type: 'text', text: 'real reply' }],
+        },
+      },
+      {
+        type: 'assistant',
+        uuid: 'a2',
+        parentUuid: 'a1',
+        sessionId: 's',
+        timestamp: '2026-05-22T00:00:02.000Z',
+        isSidechain: false,
+        isApiErrorMessage: true,
+        message: {
+          id: 'synth-msg',
+          model: '<synthetic>',
+          stop_reason: 'stop_sequence',
+          usage: { input_tokens: 0, output_tokens: 0 },
+          content: [{ type: 'text', text: 'API Error: …' }],
+        },
+      },
+    ]
+    const path = join(TMP_DIR, 'synthetic.jsonl')
+    writeFileSync(path, lines.map((l) => JSON.stringify(l)).join('\n') + '\n')
+
+    const result = await parseClaudeSession(path, [])
+    expect(result.calls).toHaveLength(1)
+    expect(result.calls[0].messageId).toBe('real-msg')
+    expect(result.calls.find((c) => c.model === '<synthetic>')).toBeUndefined()
+  })
 })
 
 function writeSubagent(

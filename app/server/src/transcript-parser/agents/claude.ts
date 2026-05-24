@@ -92,6 +92,10 @@ async function parseJsonlFile(filePath: string): Promise<JsonlParseResult> {
 
     if (line.type === 'assistant' && line.message && typeof line.message.id === 'string') {
       const msg = line.message
+      // Skip locally-synthesized API-error placeholders. They carry
+      // model "<synthetic>" with zero-token usage — not real API calls,
+      // no pricing match, would null-out cost aggregations downstream.
+      if (msg.model === '<synthetic>') continue
       const existing = callMap.get(msg.id)
       const toolUseIds: string[] = []
       if (Array.isArray(msg.content)) {
