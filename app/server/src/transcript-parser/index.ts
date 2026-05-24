@@ -36,18 +36,11 @@ export async function parseSessionTranscripts(
   const mainAgent = agents.find((a: any) => a.id === sessionId)
   const mainAgentClass = (mainAgent as any)?.agent_class ?? 'claude-code'
 
-  // Only claude-code records spawn subagents in their own jsonls;
-  // for codex sessions this list is empty (the parser ignores it anyway).
-  const subagentIds = agents
-    .filter((a: any) => (a.agent_class ?? 'claude-code') === 'claude-code')
-    .map((a: any) => a.id as string)
-    .filter((id) => id !== sessionId)
-
   let result
   if (mainAgentClass === 'claude-code') {
-    result = await parseClaudeSession(containerTranscriptPath, subagentIds)
+    result = await parseClaudeSession(containerTranscriptPath)
   } else if (mainAgentClass === 'codex') {
-    result = await parseCodexSession(containerTranscriptPath, [])
+    result = await parseCodexSession(containerTranscriptPath)
   } else {
     errors.push({
       scope: 'main',

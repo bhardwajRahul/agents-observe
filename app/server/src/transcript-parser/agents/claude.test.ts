@@ -96,7 +96,7 @@ afterAll(() => {
 
 describe('parseClaudeSession — main only', () => {
   test('returns deduped calls + prompts + empty subagents', async () => {
-    const result = await parseClaudeSession(FIXTURE_PATH, [])
+    const result = await parseClaudeSession(FIXTURE_PATH)
     expect(result.calls).toHaveLength(1)
     expect(result.calls[0].messageId).toBe('msg1')
     expect(result.calls[0].toolUseIds).toEqual(['toolu_1', 'toolu_2'])
@@ -117,7 +117,7 @@ describe('parseClaudeSession — main only', () => {
   })
 
   test('lastTimestampByPromptId records the latest line attributable to each prompt', async () => {
-    const result = await parseClaudeSession(FIXTURE_PATH, [])
+    const result = await parseClaudeSession(FIXTURE_PATH)
     // The fixture's last line for p1 is the tool_result user message at
     // 2026-05-22T00:00:02.000Z. parseClaudeSession should attribute that
     // (via parentUuid chain) back to p1.
@@ -129,7 +129,7 @@ describe('parseClaudeSession — main only', () => {
     // Fixture path: user(p1) → attachment → assistant(as1a) → assistant(as1b) → user(tool_result).
     // The deepest descendant must still attribute back to p1. The latest
     // descendant's timestamp must dominate over earlier ones.
-    const result = await parseClaudeSession(FIXTURE_PATH, [])
+    const result = await parseClaudeSession(FIXTURE_PATH)
     expect(result.lastTimestampByPromptId.p1).toBeGreaterThan(
       Date.parse('2026-05-22T00:00:01.500Z'), // beats the last assistant ts
     )
@@ -192,7 +192,7 @@ describe('parseClaudeSession — main only', () => {
     const path = join(TMP_DIR, 'multi.jsonl')
     writeFileSync(path, lines.map((l) => JSON.stringify(l)).join('\n') + '\n')
 
-    const result = await parseClaudeSession(path, [])
+    const result = await parseClaudeSession(path)
 
     // p1's last activity must be its OWN assistant call (T+10s), not
     // anything from p2's window — even though p2's lines exist later
@@ -258,7 +258,7 @@ describe('parseClaudeSession — main only', () => {
     const path = join(TMP_DIR, 'synthetic.jsonl')
     writeFileSync(path, lines.map((l) => JSON.stringify(l)).join('\n') + '\n')
 
-    const result = await parseClaudeSession(path, [])
+    const result = await parseClaudeSession(path)
     expect(result.calls).toHaveLength(1)
     expect(result.calls[0].messageId).toBe('real-msg')
     expect(result.calls.find((c) => c.model === '<synthetic>')).toBeUndefined()
@@ -333,7 +333,7 @@ describe('parseClaudeSession — subagents', () => {
         },
       ],
     )
-    const result = await parseClaudeSession(FIXTURE_PATH, ['abbbe04b48fa19be8'])
+    const result = await parseClaudeSession(FIXTURE_PATH)
     expect(result.subagents).toHaveLength(1)
     const sub = result.subagents[0]
     expect(sub.agentId).toBe('abbbe04b48fa19be8')
@@ -348,19 +348,63 @@ describe('parseClaudeSession — subagents', () => {
     expect(sub.durationMs).toBe(10_000)
   })
 
-  test('missing subagent jsonl pushes to errors[] and is filtered out of subagents[]', async () => {
-    const result = await parseClaudeSession(FIXTURE_PATH, ['nonexistent-id'])
-    // The load failure is surfaced for diagnostics…
-    expect(result.errors).toContainEqual(
-      expect.objectContaining({
-        scope: 'subagent',
-        agentId: 'nonexistent-id',
-        code: 'missing',
-      }),
+  test('session with no subagents directory parses cleanly (no errors, empty subagents)', async () => {
+    // Fresh fixture with no subagents/ dir alongside it.
+    const path = join(TMP_DIR, 'no-subs.jsonl')
+    writeFileSync(path, JSON.stringify(FIXTURE_LINES[0]) + '\n')
+    const result = await parseClaudeSession(path)
+    expect(result.subagents).toHaveLength(0)
+    expect(result.errors).toHaveLength(0)
+  })
+
+  test('stray .meta.json without a matching .jsonl is ignored (no error)', async () => {
+    // Filesystem discovery filters by `agent-*.jsonl`, so an orphan
+    // meta file shouldn't trip an error or show up in subagents[].
+    const path = join(TMP_DIR, 'stray-meta.jsonl')
+    writeFileSync(path, JSON.stringify(FIXTURE_LINES[0]) + '\n')
+    const dir = path.replace(/\.jsonl$/, '') + '/subagents'
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(
+      dir + '/agent-ghost.meta.json',
+      JSON.stringify({ agentType: 'X', description: 'd', toolUseId: 't' }),
     )
-    // …but the agent itself is skipped from the table since it has
-    // zero LLM activity — these are typically cruft entries in the DB.
-    expect(result.subagents.find((s) => s.agentId === 'nonexistent-id')).toBeUndefined()
+    const result = await parseClaudeSession(path)
+    expect(result.subagents).toHaveLength(0)
+    expect(result.errors).toHaveLength(0)
+  })
+
+  test('discovers subagents via filesystem scan, not via input list', async () => {
+    // Write a subagent whose id is NOT recorded anywhere in the DB or
+    // input. The dir-scan path must still find it. Regression guard
+    // for resumed sessions where the plugin wasn't capturing when the
+    // subagent ran.
+    const path = join(TMP_DIR, 'dirscan.jsonl')
+    writeFileSync(path, JSON.stringify(FIXTURE_LINES[0]) + '\n')
+    writeSubagent(
+      path,
+      'pre-resume-subagent',
+      { agentType: 'general-purpose', description: 'pre-resume', toolUseId: 'toolu_pre' },
+      [
+        {
+          model: 'claude-haiku-4-5-20251001',
+          ts: '2026-05-22T00:00:10.000Z',
+          usage: {
+            input_tokens: 2,
+            output_tokens: 5,
+            cache_read_input_tokens: 0,
+            cache_creation_input_tokens: 0,
+            cache_creation: { ephemeral_5m_input_tokens: 0, ephemeral_1h_input_tokens: 0 },
+            service_tier: 'standard',
+          },
+          content: [{ type: 'text', text: 'ok' }],
+        },
+      ],
+    )
+    const result = await parseClaudeSession(path)
+    const sub = result.subagents.find((s) => s.agentId === 'pre-resume-subagent')
+    expect(sub).toBeDefined()
+    expect(sub!.agentType).toBe('general-purpose')
+    expect(sub!.toolUseId).toBe('toolu_pre')
   })
 
   test('subagent without .meta.json still parses with null meta fields', async () => {
@@ -379,7 +423,7 @@ describe('parseClaudeSession — subagents', () => {
         content: [{ type: 'text', text: 'ok' }],
       },
     ])
-    const result = await parseClaudeSession(FIXTURE_PATH, ['orphan'])
+    const result = await parseClaudeSession(FIXTURE_PATH)
     const sub = result.subagents.find((s) => s.agentId === 'orphan')
     expect(sub).toBeDefined()
     expect(sub!.agentType).toBeNull()

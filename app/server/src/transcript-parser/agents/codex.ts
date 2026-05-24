@@ -66,12 +66,9 @@ function usageFromCodex(last: any): TranscriptUsage {
 /**
  * Parse a codex rollout jsonl into the common AgentParseResult shape.
  * Codex sessions never have subagents, so the `subagents` array is
- * always empty. Subagent ids in the input are ignored.
+ * always empty.
  */
-export async function parseCodexSession(
-  mainJsonlPath: string,
-  _subagentAgentIds: string[],
-): Promise<AgentParseResult> {
+export async function parseCodexSession(mainJsonlPath: string): Promise<AgentParseResult> {
   const calls: TranscriptCall[] = []
   const prompts: Record<string, { text: string; timestamp: number }> = {}
   const lastTimestampByPromptId: Record<string, number> = {}

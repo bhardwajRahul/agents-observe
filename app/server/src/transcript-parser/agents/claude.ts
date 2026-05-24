@@ -202,24 +202,42 @@ async function parseJsonlFile(filePath: string): Promise<JsonlParseResult> {
 
 /**
  * Parse the main Claude Code session jsonl plus every subagent jsonl
- * for the given agent ids. Subagent jsonls live at
- * `<dirname(mainJsonl)>/<basename(mainJsonl) without .jsonl>/subagents/agent-<agentId>.jsonl`,
- * and each has a sibling `.meta.json` with `{agentType, description, toolUseId}`.
+ * discovered in `<dirname(mainJsonl)>/<basename(mainJsonl) without .jsonl>/subagents/`.
+ * Each subagent has `agent-<agentId>.jsonl` + a sibling `agent-<agentId>.meta.json`
+ * with `{agentType, description, toolUseId}`.
  *
- * Subagent-level failures (missing file, EACCES, parse errors) populate
- * `errors[]` and are skipped — they don't fail the whole parse.
+ * Discovery is filesystem-driven (not DB-driven) so resumed sessions
+ * that ran subagents before the plugin was capturing still get counted.
+ *
+ * Subagent-level failures (EACCES, parse errors) populate `errors[]` and
+ * are skipped — they don't fail the whole parse. ENOENT on the subagents
+ * dir is silent (a session with no subagents simply has no directory).
  */
-export async function parseClaudeSession(
-  mainJsonlPath: string,
-  subagentAgentIds: string[],
-): Promise<AgentParseResult> {
+export async function parseClaudeSession(mainJsonlPath: string): Promise<AgentParseResult> {
   const main = await parseJsonlFile(mainJsonlPath)
 
   const subagentsDir = mainJsonlPath.replace(/\.jsonl$/, '') + '/subagents'
   const errors: TranscriptParseError[] = []
   const subagents: TranscriptSubagent[] = []
 
-  for (const agentId of subagentAgentIds) {
+  let dirEntries: string[] = []
+  try {
+    dirEntries = await fsp.readdir(subagentsDir)
+  } catch (err: any) {
+    if (err?.code !== 'ENOENT') {
+      errors.push({
+        scope: 'main',
+        code: 'unreadable',
+        message: `Subagents directory unreadable: ${err?.message ?? String(err)}`,
+      })
+    }
+  }
+
+  const agentIds = dirEntries
+    .filter((f) => f.startsWith('agent-') && f.endsWith('.jsonl'))
+    .map((f) => f.slice('agent-'.length, -'.jsonl'.length))
+
+  for (const agentId of agentIds) {
     const jsonlPath = `${subagentsDir}/agent-${agentId}.jsonl`
     const metaPath = `${subagentsDir}/agent-${agentId}.meta.json`
 
@@ -247,14 +265,7 @@ export async function parseClaudeSession(
     try {
       parsed = await parseJsonlFile(jsonlPath)
     } catch (err: any) {
-      if (err?.code === 'ENOENT') {
-        errors.push({
-          scope: 'subagent',
-          agentId,
-          code: 'missing',
-          message: `Subagent transcript not found: ${jsonlPath}`,
-        })
-      } else if (err?.code === 'EACCES') {
+      if (err?.code === 'EACCES') {
         errors.push({
           scope: 'subagent',
           agentId,
@@ -272,9 +283,8 @@ export async function parseClaudeSession(
     }
 
     // Skip agents that produced no LLM activity (no calls === no
-    // tokens, no duration, no tools). These are typically cruft in the
-    // DB — agent rows we recorded but never actually used. The load
-    // failure (if any) stays in `errors[]` for diagnostics.
+    // tokens, no duration, no tools). The load failure (if any) stays
+    // in `errors[]` for diagnostics.
     const row = buildSubagentRow(agentId, meta, parsed)
     if (row.requests === 0) continue
     subagents.push(row)
