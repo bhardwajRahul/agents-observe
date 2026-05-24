@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.9.8 — Improvements to session transcript stats
+
+This release improves the accuracy of transcript file scanning for session Stats view.
+The session stats now work properly even when the session events were not captured.
+Transcript files are treated as authoritative when available with fallbacks to events parsing.
+
+### Features
+
+- Session stats and `/observe stats` now works for sessions where the plugin was not previously enabled.
+- Added a Date column to the prompts table for sorting.
+- Zero-call prompts now appear in the prompts table, styled muted.
+- Prompts card now shows a discrepancy indicator when transcript prompts count differs from events count.
+- Claude subagents are now included in stats even when subagent events were not captured.
+
+### Fixes
+
+- Prompt counting now keys off the user-line UUID and filters injected entries, eliminating duplicate and miscounted prompts.
+- Subagents are now discovered via a filesystem scan instead of a DB lookup, so they show up reliably.
+- Transcript cost math now skips claude's `<synthetic>` assistant messages, previously breaking Est. Cost calculations.
+- Memoized derived data in the stats panel for better performance.
+
 ## v0.9.7 — Session transcript token stats and richer Stats tab
 
 This release introduces a major improvement in the session Stats view. Transcript-based token usage analytics with per-model breakdowns, subagent tracking, and canonical pricing. Requires the server to have read access to claude and codex transcript files. Now enabled by default.
