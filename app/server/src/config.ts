@@ -41,12 +41,9 @@ export const config = {
   verbose: logLevel === 'debug' || logLevel === 'trace',
   dbPath: resolve(process.env.AGENTS_OBSERVE_DB_PATH || '../../data/observe.db'),
   // Directory for persistent server state outside the SQLite DB —
-  // currently just the models.dev pricing cache. Defaults to the same
-  // directory as the DB so docker volume mounts cover both.
-  dataDir: resolve(
-    process.env.AGENTS_OBSERVE_DATA_DIR ||
-      dirname(resolve(process.env.AGENTS_OBSERVE_DB_PATH || '../../data/observe.db')),
-  ),
+  // currently just the models.dev pricing cache. Derived from dbPath so
+  // the docker volume mount covers both files.
+  dataDir: dirname(resolve(process.env.AGENTS_OBSERVE_DB_PATH || '../../data/observe.db')),
   storageAdapter: process.env.AGENTS_OBSERVE_STORAGE_ADAPTER || 'sqlite',
   clientDistPath: process.env.AGENTS_OBSERVE_CLIENT_DIST_PATH || '',
   devClientPort: parseInt(process.env.AGENTS_OBSERVE_DEV_CLIENT_PORT || '5174', 10),

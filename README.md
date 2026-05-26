@@ -51,43 +51,29 @@ open http://localhost:4981
 
 Default dashboard URL: <http://localhost:4981>
 
-## IMPORTANT: Upgrading & Pinning Location of the DB
+## Data Location
 
-> When installed as a claude plugin, Agents Observe currently stores the sqlite db in the same dir
-> where the plugin is installed. Upgrading the plugin will effectively create a new db instead
-> of re-using the previous one. This will be fixed in the next version.
+By default, the SQLite DB and logs live under:
 
-In the meantime, it's highly recommended to pin the location of the db by setting
-`AGENTS_OBSERVE_DATA_DIR` env var in your main `~/.claude/settings.json`.
+- `$CLAUDE_PLUGIN_DATA` (i.e. `~/.claude/plugins/data/agents-observe/`) when running as a Claude plugin
+- `~/.agents-observe/` when running outside Claude (Codex, manual CLI, dev)
 
-You can set it to whatever dir you want.
+The DB sits at `<root>/data/observe.db`, logs at `<root>/logs/`.
 
-Before upgrading the plugin:
-
-1. Stop the server with `/observe stop` in a claude session or use docker cli
-2. Move the db to whatever permanent location you want
-3. Add `AGENTS_OBSERVE_DATA_DIR` env var to your root `~/.claude/settings.json` to pin the location
-
-```bash
-# Example moving the db to a permanent location
-
-mkdir -p ~/.claude/plugins/data/agents-observe/data
-
-# Note: change the version (0.9.6) to whatever version you've installed
-mv ~/.claude/plugins/cache/agents-observe/agents-observe/0.9.6/data/data ~/.claude/plugins/data/agents-observe
-
-# Open claude settings.json in an editor
-edit ~/.claude/settings.json
-```
-
-Set AGENTS_OBSERVE_DATA_DIR env var in `~/.claude/settings.json`
+To pin the location somewhere else — e.g. an external volume — set
+`AGENTS_OBSERVE_LOCAL_DATA_ROOT` in your `~/.claude/settings.json`:
 
 ```jsonc
   // ~/.claude/settings.json
   "env": {
-    "AGENTS_OBSERVE_DATA_DIR": "~/.claude/plugins/data/agents-observe/data"
+    "AGENTS_OBSERVE_LOCAL_DATA_ROOT": "/path/to/your/dir"
   },
 ```
+
+Upgrading the plugin preserves your DB automatically. If you're upgrading
+from a pre-fix version (≤ 0.9.8) the server scans for a DB under the old
+version-scoped install dir on first start and copies it into the stable
+location. See `<root>/data/.migrated-from.json` for the record.
 
 ---
 

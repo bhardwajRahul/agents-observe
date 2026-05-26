@@ -36,13 +36,15 @@ let tmpDir = ''
 
 beforeEach(async () => {
   vi.resetModules()
-  // Isolate the on-disk cache to a fresh tmp dir per test.
+  // Isolate the on-disk cache to a fresh tmp dir per test. The server
+  // derives its cache dir from `dirname(AGENTS_OBSERVE_DB_PATH)`, so
+  // we point DB_PATH at the tmp dir.
   tmpDir = mkdtempSync(join(tmpdir(), 'models-pricing-'))
-  process.env.AGENTS_OBSERVE_DATA_DIR = tmpDir
+  process.env.AGENTS_OBSERVE_DB_PATH = join(tmpDir, 'observe.db')
 })
 
 afterEach(() => {
-  delete process.env.AGENTS_OBSERVE_DATA_DIR
+  delete process.env.AGENTS_OBSERVE_DB_PATH
   try {
     rmSync(tmpDir, { recursive: true, force: true })
   } catch {}
