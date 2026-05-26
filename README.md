@@ -51,6 +51,46 @@ open http://localhost:4981
 
 Default dashboard URL: <http://localhost:4981>
 
+### IMPORTANT: Upgrading & Pinning Location of the DB
+
+When installed as a claude plugin, Agents Observe currently stores the sqlite db in the same dir
+where the plugin is installed. Upgrading the plugin will effectively create a new db instead
+of re-using the previous one. This will be fixed in the next version.
+
+In then meantime, it's highly recommended to pin the location of the db by setting
+`AGENTS_OBSERVE_DATA_DIR` env var in your main `~/.claude/settings.json`.
+
+You can set it to whatever dir you want.
+
+Before upgrading the plugin:
+
+1. Stop the server with `/observer stop` in a claude session or use docker cli
+2. Move the db to whatever permanent location you want
+3. Add `AGENTS_OBSERVE_DATA_DIR` env var to your root `~/.claude/settings.json` to pin the location
+
+```bash
+# Example moving the db to a permanent location
+
+mkdir -p ~/.claude/plugins/data/agents-observe/data
+
+# Note: change the version (0.9.6) to whatever version you've installed
+mv ~/.claude/plugins/cache/agents-observe/agents-observe/0.9.6/data/data ~/.claude/plugins/data/agents-observe
+
+# Open claude settings.json in an editor
+edit ~/.claude/settings.json
+```
+
+Set AGENTS_OBSERVE_DATA_DIR env var in `~/.claude/settings.json`
+
+```jsonc
+  // ~/.claude/settings.json
+  "env": {
+    "AGENTS_OBSERVE_DATA_DIR": "~/.claude/plugins/data/agents-observe/data"
+  },
+```
+
+---
+
 ### Prerequisites
 
 - [Docker](https://www.docker.com/) — the server runs as a container
