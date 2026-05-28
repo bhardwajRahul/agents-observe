@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.9.9 — Stable database location across plugin upgrades
+
+This release keeps your event database in a stable location so it survives plugin upgrades, with expanded scanning to automatically migrate databases from older layouts. The dashboard now shows the host bind mount path, and the `/observe logs` command has been split into separate server, CLI, and MCP log views.
+
+Set `AGENTS_OBSERVE_LOCAL_DATA_ROOT` in `~/.claude/settings.json` to manually pin the location of the db if needed. See [README.md](https://github.com/simple10/agents-observe#data-location) for details.
+
+### Features
+
+- The database is now stored in a stable location that persists across plugin upgrades, with automatic detection and migration of databases from all previous layouts.
+- The dashboard Settings now displays the host bind mount path for the database.
+- `/observe logs` now splits output into separate `logs-server`, `logs-cli`, and `logs-mcp` views for easier troubleshooting.
+
+### Fixes
+
+- Event data is no longer lost when upgrading the plugin (#17).
+
 ## v0.9.8 — Improvements to session transcript stats
 
 This release improves the accuracy of transcript file scanning for session Stats view.
