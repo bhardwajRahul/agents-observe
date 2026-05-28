@@ -15,7 +15,6 @@ const envKeys = [
   'AGENTS_OBSERVE_PROJECT_SLUG',
   'AGENTS_OBSERVE_DOCKER_CONTAINER_NAME',
   'AGENTS_OBSERVE_DOCKER_IMAGE',
-  'AGENTS_OBSERVE_DATA_DIR',
   'AGENTS_OBSERVE_LOGS_DIR',
   'AGENTS_OBSERVE_LOG_LEVEL',
   'AGENTS_OBSERVE_TEST_SKIP_PULL',
@@ -144,15 +143,9 @@ describe('config', () => {
 
   // --- Data directories ---
 
-  it('derives dataDir from localDataRootDir when AGENTS_OBSERVE_DATA_DIR is unset', async () => {
+  it('derives dataDir as localDataRootDir/data', async () => {
     const cfg = await loadConfig()
     expect(cfg.dataDir).toBe(`${cfg.localDataRootDir}/data`)
-  })
-
-  it('prefers AGENTS_OBSERVE_DATA_DIR over localDataRootDir', async () => {
-    process.env.AGENTS_OBSERVE_DATA_DIR = '/custom/data'
-    const cfg = await loadConfig()
-    expect(cfg.dataDir).toBe('/custom/data')
   })
 
   it('uses AGENTS_OBSERVE_LOCAL_DATA_ROOT when set', async () => {
@@ -181,9 +174,23 @@ describe('config', () => {
     expect(cfg.localDataRootDir).toBe(`${process.env.HOME}/.agents-observe`)
   })
 
-  it('defaults localDataRootDir to ./data when not a plugin', async () => {
+  it('defaults localDataRootDir to $HOME/.agents-observe when not a plugin', async () => {
+    // Pre-fix this fell back to installDir/data, which lives under the
+    // version-scoped plugin cache dir and gets orphaned on every plugin
+    // upgrade — see GitHub issue #17. The stable per-user path survives.
     const cfg = await loadConfig()
-    expect(cfg.localDataRootDir).toBe(`${cfg.installDir}/data`)
+    expect(cfg.localDataRootDir).toBe(`${process.env.HOME}/.agents-observe`)
+  })
+
+  it('flags usingDefaultDataDir true when AGENTS_OBSERVE_LOCAL_DATA_ROOT is unset', async () => {
+    const cfg = await loadConfig()
+    expect(cfg.usingDefaultDataDir).toBe(true)
+  })
+
+  it('flags usingDefaultDataDir false when AGENTS_OBSERVE_LOCAL_DATA_ROOT is set', async () => {
+    process.env.AGENTS_OBSERVE_LOCAL_DATA_ROOT = '/custom/root'
+    const cfg = await loadConfig()
+    expect(cfg.usingDefaultDataDir).toBe(false)
   })
 
   // --- Logs ---
@@ -427,6 +434,16 @@ describe('getServerEnv', () => {
     expect(env.AGENTS_OBSERVE_STORAGE_ADAPTER).toBe('sqlite')
   })
 
+  it('sets HOST_DB_PATH to the host bind mount target in docker', async () => {
+    const mod = await loadModule()
+    const cfg = mod.getConfig({ runtime: 'docker' })
+    const env = mod.getServerEnv(cfg)
+
+    expect(env.AGENTS_OBSERVE_HOST_DB_PATH).toBe(`${cfg.dataDir}/observe.db`)
+    // Container-side DB_PATH is unchanged.
+    expect(env.AGENTS_OBSERVE_DB_PATH).toBe('/data/observe.db')
+  })
+
   it('uses host paths for local runtime', async () => {
     const mod = await loadModule()
     const cfg = mod.getConfig({ runtime: 'local' })
@@ -438,6 +455,9 @@ describe('getServerEnv', () => {
     expect(env.AGENTS_OBSERVE_CLIENT_DIST_PATH).toContain('app/client/dist')
     expect(env.AGENTS_OBSERVE_CLIENT_DIST_PATH).toContain(cfg.installDir)
     expect(env.AGENTS_OBSERVE_RUNTIME).toBe('local')
+    // In local mode the server falls back to DB_PATH, so HOST_DB_PATH
+    // is left empty to keep the env minimal.
+    expect(env.AGENTS_OBSERVE_HOST_DB_PATH).toBe('')
   })
 
   it('sets empty CLIENT_DIST_PATH and RUNTIME_DEV for dev runtime', async () => {

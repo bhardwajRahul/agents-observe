@@ -11,6 +11,7 @@ import {
   readVersionFile,
   ensureLocalDataDirs,
 } from './fs.mjs'
+import { maybeMigrateLegacyDb } from './migrate-db.mjs'
 
 // Absolute path to root of this project, where the plugin is installed
 const installDir = resolve(dirname(fileURLToPath(import.meta.url)), '../../../')
@@ -48,17 +49,45 @@ export function getConfig(overrides = {}) {
     serverPortFileName,
   }
 
-  // Set data root dir - defaults to ./data
-  const localDataRootDir =
-    overrides.localDataRootDir ||
-    process.env.AGENTS_OBSERVE_LOCAL_DATA_ROOT ||
-    (isPlugin && (resolvePluginDataDir(tmpConfig) || resolve(homeDir, `.${pluginName}`))) ||
-    resolve(installDir, './data')
+  // Resolve the data root dir.
+  //
+  // Order of precedence:
+  //   1. AGENTS_OBSERVE_LOCAL_DATA_ROOT — explicit user override. No
+  //      migration runs in this case; the user has told us where to look.
+  //   2. CLAUDE_PLUGIN_DATA (validated via resolvePluginDataDir) — we're
+  //      running as a Claude plugin. resolvePluginDataDir defends against
+  //      a Claude Code bug where CLAUDE_PLUGIN_DATA can point at the
+  //      wrong plugin during skill invocations (commit 486e7eb).
+  //   3. ~/.<pluginName> — stable per-user fallback for non-Claude
+  //      runtimes (Codex, manual CLI, dev) so we never store the DB
+  //      under the version-scoped install/cache dir (the bug that #17
+  //      fixed).
+  //
+  // If none of the above applies (no HOME, no plugin context, no
+  // override) we throw rather than falling back to installDir/data —
+  // that path lives under the version-scoped plugin cache and would
+  // silently reintroduce #17.
+  const userDataRoot = overrides.localDataRootDir || process.env.AGENTS_OBSERVE_LOCAL_DATA_ROOT
+  const usingDefaultDataDir = !userDataRoot
 
-  const dataDir = resolve(
-    installDir,
-    overrides.dataDir || process.env.AGENTS_OBSERVE_DATA_DIR || `${localDataRootDir}/data`,
-  )
+  let localDataRootDir
+  if (userDataRoot) {
+    localDataRootDir = userDataRoot
+  } else {
+    const claudePluginPath = resolvePluginDataDir(tmpConfig)
+    if (claudePluginPath) {
+      localDataRootDir = claudePluginPath
+    } else if (homeDir) {
+      localDataRootDir = resolve(homeDir, `.${pluginName}`)
+    } else {
+      throw new Error(
+        'Cannot resolve data dir: HOME is not set, no CLAUDE_PLUGIN_DATA, ' +
+          'and AGENTS_OBSERVE_LOCAL_DATA_ROOT is not set.',
+      )
+    }
+  }
+
+  const dataDir = `${localDataRootDir}/data`
 
   const serverPortFile = `${localDataRootDir}/${serverPortFileName}`
   const serverPort = overrides.serverPort || process.env.AGENTS_OBSERVE_SERVER_PORT || '4981'
@@ -114,6 +143,13 @@ export function getConfig(overrides = {}) {
     hasCustomApiUrl: !!customApiBaseUrl,
     baseOrigin,
     localDataRootDir,
+    /**
+     * True when AGENTS_OBSERVE_LOCAL_DATA_ROOT is not set, so the dataDir
+     * was chosen by our own default-resolution logic. Migration from
+     * legacy locations only runs in this mode — when the user has set an
+     * explicit path, we leave it alone.
+     */
+    usingDefaultDataDir,
 
     clientPort:
       process.env.AGENTS_OBSERVE_DEV_CLIENT_PORT || (runtime === 'dev' ? '5174' : serverPort),
@@ -200,6 +236,12 @@ export function getServerEnv(config) {
     AGENTS_OBSERVE_DB_PATH: isDocker
       ? `/data/${config.databaseFileName}`
       : resolve(config.dataDir, config.databaseFileName),
+    // Host-side bind mount target for the DB. In docker mode the server
+    // surfaces this in /api/health so the dashboard can show the user
+    // where the DB lives on their machine, not /data/observe.db inside
+    // the container. Unset in local mode (DB_PATH already is the host
+    // path) — server falls back to DB_PATH.
+    AGENTS_OBSERVE_HOST_DB_PATH: isDocker ? resolve(config.dataDir, config.databaseFileName) : '',
     AGENTS_OBSERVE_CLIENT_DIST_PATH: config.isDevRuntime
       ? '' // vite dev server serves the client
       : isDocker
@@ -239,12 +281,14 @@ export function getClientEnv(config) {
 }
 
 /**
- * Ensure local data dirs are created
+ * Ensure local data dirs are created, then attempt a one-time migration
+ * of any legacy DB found at a known pre-fix location. The migration is a
+ * no-op when the user has set explicit path env vars (see
+ * `usingDefaultDataDir`) or when a DB already exists at the new path.
  *
- * This function should be called before starting the server via mcp or local start scripts
- * @param {*} config
- * @returns
+ * Called from start.mjs and docker.mjs before the server is launched.
  */
 export function initLocalDataDirs(config) {
-  return ensureLocalDataDirs(config)
+  ensureLocalDataDirs(config)
+  return maybeMigrateLegacyDb(config)
 }

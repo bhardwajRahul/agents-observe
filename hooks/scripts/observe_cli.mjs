@@ -5,6 +5,8 @@
 
 import { createInterface } from 'node:readline'
 import { spawn } from 'node:child_process'
+import { existsSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { getConfig } from './lib/config.mjs'
 import { getJson } from './lib/http.mjs'
 import { createLogger } from './lib/logger.mjs'
@@ -19,7 +21,6 @@ const log = createLogger('cli.log', config)
 switch (cliArgs.commands[0] || 'help') {
   case 'help':
     console.log('Usage: node observe_cli.mjs <command> [--base-url URL] [--project-slug SLUG]')
-    console.log('Commands: hook, hook-sync, hook-autostart, health, start, stop, restart, db-reset')
     console.log('  hook:            Send an event (fire-and-forget)')
     console.log('  hook-sync:       Send an event and return systemMessage JSON')
     console.log('  hook-autostart:  Like hook-sync, but auto-starts server if unreachable')
@@ -28,7 +29,9 @@ switch (cliArgs.commands[0] || 'help') {
     console.log('  stop:            Stop the server')
     console.log('  restart:         Restart the server')
     console.log('  db-reset:        Delete the SQLite database [--force to skip confirmation]')
-    console.log('  logs [args]:     Show Docker container logs (e.g. logs -f, logs -n 100)')
+    console.log('  logs-server:     Show Docker container logs (passthrough, e.g. -f, -n 100)')
+    console.log('  logs-cli [-n N]: Tail the local cli.log file (default 20 lines)')
+    console.log('  logs-mcp [-n N]: Tail the local mcp.log file (default 20 lines)')
     process.exit(0)
   case 'hook':
     hookCommand(config, log)
@@ -54,14 +57,18 @@ switch (cliArgs.commands[0] || 'help') {
   case 'db-reset':
     dbResetCommand()
     break
-  case 'logs':
-    logsCommand()
+  case 'logs-server':
+    logsServerCommand()
+    break
+  case 'logs-cli':
+    logsFileCommand('cli.log')
+    break
+  case 'logs-mcp':
+    logsFileCommand('mcp.log')
     break
   default:
     console.error(`Unknown command: ${cliArgs.commands[0]}`)
-    console.error(
-      'Usage: node observe_cli.mjs <hook|health|restart> [--base-url URL] [--project-slug SLUG]',
-    )
+    console.error('Run `node observe_cli.mjs help` to see available commands.')
     process.exit(1)
 }
 
@@ -101,10 +108,9 @@ async function healthCommand(exit = true) {
     if (isDocker) {
       console.log(`  Container Name: ${config.containerName}`)
       console.log(`  Image: ${config.dockerImage}`)
-      console.log(`  Data Dir: ${config.dataDir} (bind mounted)`)
-    } else {
-      console.log(`  Database: ${b.dbPath || 'unknown'}`)
     }
+    // Always the host-side path (server returns hostDbPath as dbPath).
+    console.log(`  Database: ${b.dbPath || 'unknown'}${isDocker ? ' (bind mounted)' : ''}`)
     console.log(`  Log Level: ${b.logLevel || 'unknown'}`)
 
     if (config.expectedVersion && b.version && config.expectedVersion !== b.version) {
@@ -143,13 +149,33 @@ async function stopCommand() {
   log.info('Server stopped')
 }
 
-function logsCommand() {
-  // Pass any extra CLI args (e.g. -f, -n 100) through to docker logs
+function logsServerCommand() {
+  // Pass any extra CLI args (e.g. -f, -n 100) through to docker logs.
   const extraArgs = cliArgs.commands.slice(1)
   const args = ['logs', ...extraArgs, config.containerName]
   const child = spawn('docker', args, { stdio: 'inherit' })
   child.on('error', (err) => {
     console.error(`Failed to run docker logs: ${err.message}`)
+    process.exit(1)
+  })
+  child.on('close', (code) => process.exit(code ?? 0))
+}
+
+/**
+ * Tail a log file from config.logsDir. Resolves the path itself so the
+ * /observe skill doesn't have to probe ~/.claude/plugins/data/... and
+ * ~/.agents-observe/... fallbacks.
+ */
+function logsFileCommand(filename) {
+  const path = resolve(config.logsDir, filename)
+  if (!existsSync(path)) {
+    console.log(`${filename} not found at ${path}`)
+    process.exit(0)
+  }
+  const lines = cliArgs.tailLines ?? 20
+  const child = spawn('tail', ['-n', String(lines), path], { stdio: 'inherit' })
+  child.on('error', (err) => {
+    console.error(`Failed to tail ${path}: ${err.message}`)
     process.exit(1)
   })
   child.on('close', (code) => process.exit(code ?? 0))
@@ -201,10 +227,16 @@ function confirm(prompt) {
 }
 
 function parseArgs(args) {
-  // Commands like 'logs' pass remaining args through to docker, so once we
-  // encounter one of these we stop parsing and capture everything that follows.
-  const passthroughCommands = new Set(['logs'])
-  const parsed = { commands: [], baseUrl: null, projectSlug: null, force: false }
+  // `logs-server` passes remaining args through to `docker logs`, so once
+  // it's the active command, everything after is captured verbatim.
+  const passthroughCommands = new Set(['logs-server'])
+  const parsed = {
+    commands: [],
+    baseUrl: null,
+    projectSlug: null,
+    force: false,
+    tailLines: null,
+  }
   for (let i = 0; i < args.length; i++) {
     if (parsed.commands.length && passthroughCommands.has(parsed.commands[0])) {
       parsed.commands.push(args[i])
@@ -216,6 +248,10 @@ function parseArgs(args) {
       i++
     } else if (args[i] === '--force') {
       parsed.force = true
+    } else if (args[i] === '-n' && args[i + 1]) {
+      const n = parseInt(args[i + 1], 10)
+      if (!Number.isNaN(n)) parsed.tailLines = n
+      i++
     } else if (!args[i].startsWith('-')) {
       parsed.commands.push(args[i])
     }

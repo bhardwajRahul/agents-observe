@@ -20,4 +20,4 @@ services:
     ports:
       - "${AGENTS_OBSERVE_SERVER_PORT:-4981}:${AGENTS_OBSERVE_SERVER_PORT:-4981}"
     volumes:
-      - ${AGENTS_OBSERVE_DATA_DIR:-./data}:/data
+      - ./data:/data

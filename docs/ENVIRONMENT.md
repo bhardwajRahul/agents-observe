@@ -25,8 +25,7 @@ per-user behavior.
 | `AGENTS_OBSERVE_LOG_LEVEL` | `warn` | CLI log level: `error`, `warn`, `info`, `debug`, `trace`. |
 | `AGENTS_OBSERVE_LOGS_DIR` | `<data root>/logs` | Directory where the CLI writes logs. |
 | `AGENTS_OBSERVE_HOOK_STARTUP_TIMEOUT` | `30000` | Ms the `hook-autostart` command waits for the server to become healthy after starting it. |
-| `AGENTS_OBSERVE_LOCAL_DATA_ROOT` | *(plugin-specific fallback)* | Root directory for data + logs when not running as a plugin. |
-| `AGENTS_OBSERVE_DATA_DIR` | `<data root>/data` | Directory for the SQLite DB and related files. |
+| `AGENTS_OBSERVE_LOCAL_DATA_ROOT` | `$CLAUDE_PLUGIN_DATA` (plugin) / `~/.agents-observe` (else) | Root directory for the SQLite DB, logs, and server-port file. The DB lives at `<root>/data/observe.db`. |
 
 ---
 
@@ -40,7 +39,7 @@ server directly.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `AGENTS_OBSERVE_SERVER_PORT` | `4981` | HTTP + WebSocket port the server listens on. |
-| `AGENTS_OBSERVE_DB_PATH` | derived | Absolute path to the SQLite DB file. In Docker: `/data/observe.db`. Locally: computed from `AGENTS_OBSERVE_DATA_DIR`. |
+| `AGENTS_OBSERVE_DB_PATH` | derived | Absolute path to the SQLite DB file. In Docker: `/data/observe.db`. Locally: computed as `<AGENTS_OBSERVE_LOCAL_DATA_ROOT>/data/observe.db`. |
 | `AGENTS_OBSERVE_STORAGE_ADAPTER` | `sqlite` | Storage backend. Only `sqlite` is supported today. |
 | `AGENTS_OBSERVE_CLIENT_DIST_PATH` | derived | Path to the built React client (`app/client/dist`). Empty in dev runtime (Vite serves the client). |
 | `AGENTS_OBSERVE_ALLOW_DB_RESET` | `backup` | Admin reset policy: `allow` (wipe without backup), `backup` (snapshot the DB then wipe), `deny` (refuse). |
