@@ -9,9 +9,13 @@ import { constellationTheme } from './themes/constellation'
  */
 export const dashboardThemes: DashboardTheme[] = [sessionsListTheme, constellationTheme]
 
-export const DEFAULT_DASHBOARD_THEME_ID = sessionsListTheme.id
+export const DEFAULT_DASHBOARD_THEME_ID = constellationTheme.id
 
 /** Resolve a (possibly stale/unknown) id to a registered theme, never null. */
 export function resolveDashboardTheme(id: string | null | undefined): DashboardTheme {
-  return dashboardThemes.find((t) => t.id === id) ?? dashboardThemes[0]
+  return (
+    dashboardThemes.find((t) => t.id === id) ??
+    dashboardThemes.find((t) => t.id === DEFAULT_DASHBOARD_THEME_ID) ??
+    dashboardThemes[0]
+  )
 }

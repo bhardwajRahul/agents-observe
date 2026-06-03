@@ -763,7 +763,10 @@ export const useUIStore = create<UIState>((set, get) => ({
   sessionSortOrder: 'activity',
   setSessionSortOrder: (order) => set({ sessionSortOrder: order }),
 
-  dashboardThemeId: localStorage.getItem('agents-observe-dashboard-theme') || 'sessions-list',
+  // Default to the constellation view on a fresh load; an explicit prior choice
+  // (incl. 'sessions-list') persists via localStorage. Keep the id literal to
+  // avoid importing the dashboard registry into the store (circular).
+  dashboardThemeId: localStorage.getItem('agents-observe-dashboard-theme') || 'constellation',
   setDashboardThemeId: (id) => {
     localStorage.setItem('agents-observe-dashboard-theme', id)
     set({ dashboardThemeId: id })
