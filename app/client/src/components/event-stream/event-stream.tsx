@@ -1,4 +1,4 @@
-import { useMemo, useRef, useEffect, useDeferredValue, useCallback } from 'react'
+import { useMemo, useRef, useEffect, useLayoutEffect, useDeferredValue, useCallback } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { useQuery } from '@tanstack/react-query'
 import { useEffectiveEvents } from '@/hooks/use-effective-events'
@@ -201,8 +201,50 @@ export function EventStream() {
     getItemKey: (index) => filteredEvents[index]?.id ?? index,
   })
 
+  // Control react-virtual's scroll anchoring on item resize. A conversation
+  // thread sits at the BOTTOM of an expanded row, so when that row straddles
+  // the viewport top, the default anchoring (item.start < offset) shifts scroll
+  // by the full height delta even though the changed content is below the fold
+  // — over-scrolling the row out of frame. For the row currently being toggled,
+  // only anchor when the whole row is above the viewport (item.end <= offset);
+  // otherwise leave scroll alone and let the change accordion naturally. Other
+  // items keep the default. scrollTop already reflects react-virtual's applied
+  // adjustments, so it stands in for the (private) getScrollOffset() +
+  // scrollAdjustments. Assigned on the instance because it isn't exposed in the
+  // React option types (it's a public field on virtual-core's Virtualizer).
+  virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item) => {
+    const offset = scrollRef.current?.scrollTop ?? 0
+    if (item.key === useUIStore.getState().threadRemeasureEventId) {
+      return item.end <= offset
+    }
+    return item.start < offset
+  }
+
   const virtualItems = virtualizer.getVirtualItems()
   const totalSize = virtualizer.getTotalSize()
+
+  // When a conversation thread is toggled, its row's height changes but the
+  // virtualizer would only learn of it asynchronously (ResizeObserver), which
+  // reflows a frame late and flashes. Re-measure the row synchronously here in
+  // a layout effect (after EventDetail's height change commits, before paint):
+  // virtualizer.measureElement updates the size cache AND runs react-virtual's
+  // native scroll anchoring in the same frame — the same smooth path that
+  // estimateSize gives row expand/collapse. Subscribed so it fires on toggle.
+  const threadRemeasureEventId = useUIStore((s) => s.threadRemeasureEventId)
+  useLayoutEffect(() => {
+    if (threadRemeasureEventId == null) return
+    const scroller = scrollRef.current
+    const idx = filteredEvents.findIndex((e) => e.id === threadRemeasureEventId)
+    if (scroller && idx >= 0) {
+      const rowEl = scroller.querySelector<HTMLElement>(`[data-index="${idx}"]`)
+      // measureElement is a no-op while a native momentum scroll is in flight
+      // (virtual-core guards it with `!isScrolling || scrollState`). In that
+      // narrow case the toggle falls back to the async ResizeObserver — the
+      // brief flash can reappear, but it's purely cosmetic and self-corrects.
+      if (rowEl) virtualizer.measureElement(rowEl)
+    }
+    useUIStore.getState().setThreadRemeasureEventId(null)
+  }, [threadRemeasureEventId, filteredEvents, virtualizer])
 
   // No need to track session changes for scroll — the entire component
   // remounts on session change (key={sessionId} in main-panel).

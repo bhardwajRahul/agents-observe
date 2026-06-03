@@ -231,6 +231,22 @@ interface UIState {
   selectedEventId: number | null
   setSelectedEventId: (id: number | null) => void
 
+  // Default conversation-thread collapse state for newly expanded event
+  // details. In-memory only (default expanded). Detail panels SEED their local
+  // state from this at mount and write back here on toggle — they must NOT
+  // subscribe reactively, or toggling one thread would collapse every open
+  // detail at once and jump the virtualizer scroll.
+  threadCollapsed: boolean
+  setThreadCollapsed: (collapsed: boolean) => void
+
+  // When a thread toggle changes a row's height, EventDetail puts the row's
+  // event id here. EventStream re-measures that row synchronously (in a layout
+  // effect) so the virtualizer reflows and anchors in the same frame — matching
+  // the smooth path estimateSize gives row expand/collapse, instead of the
+  // async ResizeObserver reflow that made thread toggles flash. Cleared after.
+  threadRemeasureEventId: number | null
+  setThreadRemeasureEventId: (id: number | null) => void
+
   // Session being edited in the SessionEditModal (null = closed)
   editingSessionId: string | null
   editingSessionTab: 'details' | 'stats' | 'labels'
@@ -641,6 +657,12 @@ export const useUIStore = create<UIState>((set, get) => ({
 
   selectedEventId: null,
   setSelectedEventId: (id) => set({ selectedEventId: id }),
+
+  threadCollapsed: false,
+  setThreadCollapsed: (collapsed) => set({ threadCollapsed: collapsed }),
+
+  threadRemeasureEventId: null,
+  setThreadRemeasureEventId: (id) => set({ threadRemeasureEventId: id }),
 
   editingSessionId: null,
   editingSessionTab: 'details',

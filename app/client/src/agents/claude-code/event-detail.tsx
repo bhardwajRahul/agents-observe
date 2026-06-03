@@ -206,6 +206,27 @@ export function ClaudeCodeEventDetail({
   const turnEvents = event.turnId ? dataApi.getTurnEvents(event.turnId) : []
   const threadRows = showThread ? dedupeThread(turnEvents.filter((e) => e.displayEventStream)) : []
 
+  // Thread collapse is LOCAL to this detail panel, seeded once from the store
+  // default at mount. Toggling writes back to the store so the next expanded
+  // row picks up the choice — but we never subscribe reactively, so toggling
+  // one open thread doesn't collapse every other open detail (which would jump
+  // the virtualizer scroll). Re-expanding a row remounts and re-seeds.
+  const [threadCollapsed, setThreadCollapsedLocal] = useState(
+    () => useUIStore.getState().threadCollapsed,
+  )
+  const toggleThreadCollapsed = () => {
+    const next = !threadCollapsed
+    setThreadCollapsedLocal(next)
+    const store = useUIStore.getState()
+    store.setThreadCollapsed(next)
+    // Ask the stream to re-measure this row synchronously once our height
+    // change commits, so the virtualizer reflows (and anchors scroll) in the
+    // same frame — the same smooth path row expand/collapse gets from its
+    // estimateSize change, rather than the async ResizeObserver reflow that
+    // made thread toggles flash. No-op outside the virtualized stream.
+    store.setThreadRemeasureEventId(event.id)
+  }
+
   // Get grouped events (e.g., Pre + Post for tool calls)
   const groupedEvents = event.groupId ? dataApi.getGroupedEvents(event.groupId) : []
   const pairedEvent = groupedEvents.find((e) => e.id !== event.id) ?? null
@@ -269,21 +290,46 @@ export function ClaudeCodeEventDetail({
         />
       )}
 
-      {/* Conversation thread for UserPrompt / Stop / Subagent events */}
+      {/* Conversation thread for UserPrompt / Stop / Subagent events.
+          Collapsible — collapse state lives in the UI store (session-wide). */}
       {showThread && (
         <div>
-          <div className="text-muted-foreground mb-1.5 font-medium">Conversation thread:</div>
-          {threadRows.length > 0 ? (
-            <div className="space-y-0.5 rounded border border-border/50 bg-muted/20 p-1.5">
-              {threadRows.map((e) => (
-                <ThreadEvent key={e.id} event={e} isCurrentEvent={e.id === event.id} />
-              ))}
-            </div>
-          ) : (
-            <div className="text-muted-foreground/80 dark:text-muted-foreground/60 py-1">
-              No thread events found
-            </div>
-          )}
+          <div
+            className="mb-1.5 flex items-center gap-1 font-medium text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+            onClick={toggleThreadCollapsed}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                toggleThreadCollapsed()
+              }
+            }}
+          >
+            {threadCollapsed ? (
+              <ChevronRight className="h-3 w-3" />
+            ) : (
+              <ChevronDown className="h-3 w-3" />
+            )}
+            <span>Conversation thread</span>
+            {threadCollapsed && threadRows.length > 0 && (
+              <span className="ml-1 text-[10px] text-muted-foreground/70 tabular-nums">
+                ({threadRows.length})
+              </span>
+            )}
+          </div>
+          {!threadCollapsed &&
+            (threadRows.length > 0 ? (
+              <div className="space-y-0.5 rounded border border-border/50 bg-muted/20 p-1.5">
+                {threadRows.map((e) => (
+                  <ThreadEvent key={e.id} event={e} isCurrentEvent={e.id === event.id} />
+                ))}
+              </div>
+            ) : (
+              <div className="text-muted-foreground/80 dark:text-muted-foreground/60 py-1">
+                No thread events found
+              </div>
+            ))}
         </div>
       )}
     </div>
