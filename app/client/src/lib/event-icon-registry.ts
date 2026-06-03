@@ -33,6 +33,7 @@ import {
   Plug,
   Hammer,
   Layers,
+  Braces,
 } from 'lucide-react'
 import { resolveIconName } from '@/lib/dynamic-icon'
 import { getIconCustomization, COLOR_PRESETS } from '@/hooks/use-icon-customizations'
@@ -138,6 +139,13 @@ export const EVENT_ICON_REGISTRY: Record<string, EventIconEntry> = {
   },
   ToolAgent: { id: 'ToolAgent', name: 'Agent', group: 'Tools', icon: Bot, defaultColor: PURPLE },
   ToolMcp: { id: 'ToolMcp', name: 'MCP Tool', group: 'Tools', icon: Plug, defaultColor: CYAN },
+  ToolStructuredOutput: {
+    id: 'ToolStructuredOutput',
+    name: 'Structured Output',
+    group: 'Tools',
+    icon: Braces,
+    defaultColor: CYAN,
+  },
   ToolDefault: {
     id: 'ToolDefault',
     name: 'Tool (default)',

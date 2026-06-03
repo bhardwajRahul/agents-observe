@@ -501,6 +501,9 @@ function ToolDetail({
       <div className="space-y-1.5">
         {event.toolName && <DetailRow label="Tool" value={event.toolName} />}
         {failTi.command && <DetailCode label="Command" value={failTi.command} />}
+        {/* StructuredOutput failures: show the rejected/partial output above
+            the schema-validation error so both are visible. */}
+        {event.toolName === 'StructuredOutput' && <StructuredOutputDetail data={failTi} />}
         {payload.error && (
           <DetailCode
             label="Error"
@@ -912,6 +915,24 @@ function ToolDetail({
         </div>
       )
     }
+    case 'StructuredOutput': {
+      // tool_input *is* the structured payload. The Pre event's own
+      // tool_input is often partial (just `summary`); the full schema data
+      // lands on the paired Post event, which also carries `error` on
+      // PostToolUseFailure. Payloads aren't merged onto this Pre row, so we
+      // read the Post side explicitly. tool_response is only a "provided
+      // successfully" confirmation, so it's not shown.
+      const soPost = pairedEvent?.payload as Record<string, any> | undefined
+      const soData = { ...ti, ...(soPost?.tool_input as Record<string, any> | undefined) }
+      const soErrRaw = soPost?.error ?? payload.error
+      const soError =
+        typeof soErrRaw === 'string'
+          ? soErrRaw
+          : soErrRaw
+            ? JSON.stringify(soErrRaw, null, 2)
+            : undefined
+      return <StructuredOutputDetail data={soData} error={soError} />
+    }
     default: {
       // Extract any base64 images from the tool_response so MCP tools
       // that return screenshots (chrome-devtools take_screenshot,
@@ -1096,6 +1117,40 @@ function AskUserQuestionBlock({
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+/** Hybrid render for a StructuredOutput payload: elevate the conventional
+ *  `summary` field as a labeled row, then dump the remaining schema-defined
+ *  fields as one formatted JSON block. Shared by the PostToolUse tool switch
+ *  and the PostToolUseFailure block (where `data` is the rejected output). */
+// Fields lifted out of the JSON `Output` block into their own DetailCode rows.
+// They're frequently long markdown, far more readable rendered on their own
+// than escaped inside a JSON dump. `summary` is always elevated; `reasoning`
+// and `refinedFix` follow when present.
+const STRUCTURED_OUTPUT_ELEVATED = ['summary', 'reasoning', 'refinedFix'] as const
+
+function StructuredOutputDetail({ data, error }: { data: Record<string, any>; error?: string }) {
+  const str = (k: string) => (typeof data[k] === 'string' ? (data[k] as string) : undefined)
+  const summary = str('summary')
+  const reasoning = str('reasoning')
+  const refinedFix = str('refinedFix')
+  const rest: Record<string, any> = {}
+  for (const [k, v] of Object.entries(data)) {
+    if ((STRUCTURED_OUTPUT_ELEVATED as readonly string[]).includes(k) && typeof v === 'string') {
+      continue
+    }
+    rest[k] = v
+  }
+  const hasRest = Object.keys(rest).length > 0
+  return (
+    <div className="space-y-1.5">
+      {summary && <DetailCode label="Summary" value={summary} />}
+      {reasoning && <DetailCode label="Reasoning" value={reasoning} />}
+      {refinedFix && <DetailCode label="Refined fix" value={refinedFix} />}
+      {hasRest && <DetailCode label="Output" value={JSON.stringify(rest, null, 2)} />}
+      {error && <DetailCode label="Error" value={error} />}
     </div>
   )
 }

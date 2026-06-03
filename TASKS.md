@@ -2,6 +2,7 @@
 
 ## QUEUED TASKS
 
+- [ ] Add useMemo to event details output if CPU spikes are noticeable - currently some expanded event details run JSON.stringify on every render
 - [ ] Add support for setting session slug to session_title whenever session_title is in the payload and slug is empty
   - Might be best as UI only?
 
