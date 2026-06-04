@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { useUIStore } from '@/stores/ui-store'
-import { ACTIVITY_CONFIG } from '@/config/activity'
 
 /**
- * Returns true for `pulseDurationMs` after the given session last received
- * an activity ping from the server, then flips back to false.
+ * Returns true for the user-configured duration after the given session last
+ * received an activity ping from the server, then flips back to false.
  *
  * The pulse counter lives in ui-store and is incremented by the WS handler
  * on every `{ type: 'activity' }` message. We read it here, track changes
@@ -42,6 +41,8 @@ export function useAggregatePulseActive(sessionIds: string[]): boolean {
 }
 
 function usePulseTimer(counter: number): boolean {
+  const enabled = useUIStore((s) => s.activeIndicatorEnabled)
+  const durationMs = useUIStore((s) => s.activeIndicatorSeconds) * 1000
   const prevRef = useRef(counter)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [active, setActive] = useState(false)
@@ -53,13 +54,15 @@ function usePulseTimer(counter: number): boolean {
     // so on subsequent renders any change means a real new ping.
     if (counter === prevRef.current) return
     prevRef.current = counter
+    // Indicator disabled in settings — never light up.
+    if (!enabled) return
     setActive(true)
     if (timerRef.current) clearTimeout(timerRef.current)
     timerRef.current = setTimeout(() => {
       setActive(false)
       timerRef.current = null
-    }, ACTIVITY_CONFIG.pulseDurationMs)
-  }, [counter])
+    }, durationMs)
+  }, [counter, enabled, durationMs])
 
   useEffect(() => {
     return () => {
@@ -67,5 +70,6 @@ function usePulseTimer(counter: number): boolean {
     }
   }, [])
 
-  return active
+  // When disabled, force off immediately even if a pulse is mid-flight.
+  return enabled ? active : false
 }

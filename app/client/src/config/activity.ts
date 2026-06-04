@@ -3,8 +3,12 @@
  *  Server-side throttle (see app/server/src/websocket.ts) caps pings at
  *  one per session per 10s. The pulse animation should fade within the
  *  window so sessions look "quiet" between pings instead of continuously
- *  animating. 3s is short enough to feel like a heartbeat without being
- *  so short that it gets lost. */
+ *  animating.
+ *
+ *  `pulseDurationMs` is only the DEFAULT. Users can change how long the
+ *  active-session indicator stays lit — or disable it — in Settings →
+ *  Display → Sidebar. The live values come from the UI store
+ *  (`activeIndicatorEnabled` / `activeIndicatorSeconds`). */
 export const ACTIVITY_CONFIG = {
-  pulseDurationMs: 5_000,
+  pulseDurationMs: 10_000,
 } as const

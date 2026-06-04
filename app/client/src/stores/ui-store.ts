@@ -3,6 +3,7 @@ import type { Label } from '@/types'
 import type { EnrichedEvent } from '@/agents/types'
 import type { TimeRange } from '@/config/time-ranges'
 import { getServerHealth } from '@/lib/server-health'
+import { ACTIVITY_CONFIG } from '@/config/activity'
 
 // URL hash grammar (positional, never pattern-based):
 //   #/                      → home
@@ -311,6 +312,14 @@ interface UIState {
   // Notification alerts — when off, the sidebar bells never appear.
   notificationsEnabled: boolean
   setNotificationsEnabled: (enabled: boolean) => void
+
+  // Active-session indicator — the green pulse on the sidebar session dot /
+  // project folder after activity. `activeIndicatorEnabled` toggles it;
+  // `activeIndicatorSeconds` is how long it stays lit before fading.
+  activeIndicatorEnabled: boolean
+  setActiveIndicatorEnabled: (enabled: boolean) => void
+  activeIndicatorSeconds: number
+  setActiveIndicatorSeconds: (seconds: number) => void
 
   // Rewind mode: freezes the event/timeline view at a snapshot of events
   rewindMode: boolean
@@ -741,6 +750,22 @@ export const useUIStore = create<UIState>((set, get) => ({
   setNotificationsEnabled: (enabled) => {
     localStorage.setItem('agents-observe-notifications', enabled ? 'on' : 'off')
     set({ notificationsEnabled: enabled })
+  },
+
+  activeIndicatorEnabled: localStorage.getItem('agents-observe-active-indicator') !== 'off',
+  setActiveIndicatorEnabled: (enabled) => {
+    localStorage.setItem('agents-observe-active-indicator', enabled ? 'on' : 'off')
+    set({ activeIndicatorEnabled: enabled })
+  },
+
+  activeIndicatorSeconds: (() => {
+    const raw = localStorage.getItem('agents-observe-active-indicator-seconds')
+    const n = raw != null ? Number(raw) : NaN
+    return Number.isFinite(n) && n > 0 ? n : ACTIVITY_CONFIG.pulseDurationMs / 1000
+  })(),
+  setActiveIndicatorSeconds: (seconds) => {
+    localStorage.setItem('agents-observe-active-indicator-seconds', String(seconds))
+    set({ activeIndicatorSeconds: seconds })
   },
 
   rewindMode: false,

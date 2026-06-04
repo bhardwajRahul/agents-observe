@@ -30,7 +30,12 @@ function AggregateProbe({
 
 beforeEach(() => {
   vi.useFakeTimers()
-  useUIStore.setState({ sessionPulses: {} })
+  // Reset to defaults so config-driven tests below don't leak into others.
+  useUIStore.setState({
+    sessionPulses: {},
+    activeIndicatorEnabled: true,
+    activeIndicatorSeconds: ACTIVITY_CONFIG.pulseDurationMs / 1000,
+  })
 })
 
 afterEach(() => {
@@ -157,6 +162,57 @@ describe('useAggregatePulseActive', () => {
     expect(values.at(-1)).toBe(true)
     act(() => {
       vi.advanceTimersByTime(ACTIVITY_CONFIG.pulseDurationMs)
+    })
+    expect(values.at(-1)).toBe(false)
+  })
+})
+
+describe('active-session indicator config', () => {
+  it('never activates when the indicator is disabled', () => {
+    useUIStore.setState({ activeIndicatorEnabled: false })
+    const values: boolean[] = []
+    render(<SessionProbe sessionId="sess-1" onValue={(v) => values.push(v)} />)
+    act(() => {
+      useUIStore.getState().pulseSession('sess-1')
+    })
+    expect(values.at(-1)).toBe(false)
+    // Even after time passes it stays off.
+    act(() => {
+      vi.advanceTimersByTime(ACTIVITY_CONFIG.pulseDurationMs)
+    })
+    expect(values.at(-1)).toBe(false)
+  })
+
+  it('honors a custom duration from activeIndicatorSeconds', () => {
+    useUIStore.setState({ activeIndicatorSeconds: 3 }) // 3s = 3000ms
+    const values: boolean[] = []
+    render(<SessionProbe sessionId="sess-1" onValue={(v) => values.push(v)} />)
+    act(() => {
+      useUIStore.getState().pulseSession('sess-1')
+    })
+    expect(values.at(-1)).toBe(true)
+    // Still lit just before the 3s window closes.
+    act(() => {
+      vi.advanceTimersByTime(2999)
+    })
+    expect(values.at(-1)).toBe(true)
+    // Fades exactly at 3s.
+    act(() => {
+      vi.advanceTimersByTime(1)
+    })
+    expect(values.at(-1)).toBe(false)
+  })
+
+  it('forces off immediately when disabled mid-pulse', () => {
+    const values: boolean[] = []
+    render(<SessionProbe sessionId="sess-1" onValue={(v) => values.push(v)} />)
+    act(() => {
+      useUIStore.getState().pulseSession('sess-1')
+    })
+    expect(values.at(-1)).toBe(true)
+    // Turning the setting off should drop the indicator without waiting.
+    act(() => {
+      useUIStore.setState({ activeIndicatorEnabled: false })
     })
     expect(values.at(-1)).toBe(false)
   })
