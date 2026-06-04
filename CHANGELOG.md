@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.9.11 — NEW Constellation dashboard, Hermes agent support, and richer conversation threads
+
+This release introduces the fun new Constellation UI home-page view — an activity bubble visualization. It adds first-class support for Hermes agents, including dedicated event rendering, session stats, and model pricing, alongside a redesigned collapsible conversation thread with navigation and stable scrolling.
+
+### Features
+
+- Added the Constellation dashboard theme; it's now the default home-page view with a toggle to switch to previous List view.
+- Added first-class Hermes agent support: dedicated event rendering, session stats derived from events, a model pricing endpoint, and a Hermes agent plugin.
+- Redesigned the conversation thread to be collapsible with thread navigation, stable stream scrolling, and improved parity with the event stream.
+- Added rendering for claude's StructuredOutput tool events.
+- Added positional URL routing with a project segment derived from the session.
+- Made the active-session indicator duration configurable.
+
+### Fixes
+
+- Normalized epoch-seconds timestamps to milliseconds at ingest so event times display correctly.
+
+### Other
+
+- Improved routing performance by caching session lookups and bounding the route fallback set.
+
 ## v0.9.10 — Subagent token attribution and Workflow event tracking
 
 This release adds token cost attribution for subagents and workflows, so the tokens they consume are now traced back to the prompt that triggered them. It also improves Workflow tool tracking by correctly pairing pre- and post-execution events and rendering their details in the dashboard.
