@@ -178,7 +178,7 @@ describe('claude-code processEvent — StructuredOutput', () => {
     expect(event.summary).toBe('token refresh storm')
   })
 
-  test('summary falls back to field count when no string scalars exist', () => {
+  test('summary falls back to a per-field breakdown when no string scalars exist', () => {
     const raw = {
       id: 1,
       agentId: 'a',
@@ -191,7 +191,41 @@ describe('claude-code processEvent — StructuredOutput', () => {
       },
     }
     const { event } = processEvent(raw, createCtx())
-    expect(event.summary).toBe('‹1 field›')
+    expect(event.summary).toBe('‹findings: 1›')
+  })
+
+  test('summary reports array lengths in the field breakdown', () => {
+    const raw = {
+      id: 1,
+      agentId: 'a',
+      hookName: 'PreToolUse',
+      timestamp: 0,
+      payload: {
+        tool_name: 'StructuredOutput',
+        tool_use_id: 't1',
+        tool_input: {
+          findings: [{ id: 'A' }, { id: 'B' }, { id: 'C' }, { id: 'D' }, { id: 'E' }],
+        },
+      },
+    }
+    const { event } = processEvent(raw, createCtx())
+    expect(event.summary).toBe('‹findings: 5›')
+  })
+
+  test('field breakdown names every key, with array lengths and object key counts', () => {
+    const raw = {
+      id: 1,
+      agentId: 'a',
+      hookName: 'PreToolUse',
+      timestamp: 0,
+      payload: {
+        tool_name: 'StructuredOutput',
+        tool_use_id: 't1',
+        tool_input: { findings: [{ id: 'A' }, { id: 'B' }], effort: { level: 'xhigh' } },
+      },
+    }
+    const { event } = processEvent(raw, createCtx())
+    expect(event.summary).toBe('‹findings: 2, effort: {1}›')
   })
 
   test('summary uses "<id>: <refinedFix>" when summary is absent', () => {
@@ -223,8 +257,8 @@ describe('claude-code processEvent — StructuredOutput', () => {
       },
     }
     const { event } = processEvent(raw, createCtx())
-    // "s" and "r" are both too short, so fall through to the field count.
-    expect(event.summary).toBe('‹3 fields›')
+    // "s" and "r" are both too short, so fall through to the field breakdown.
+    expect(event.summary).toBe('‹summary: s, topRisks: r, findings: 1›')
   })
 
   test('summary is truncated to 200 chars with an ellipsis', () => {

@@ -175,8 +175,8 @@ function usableSummary(s: unknown): s is string {
 /** One-line summary for a StructuredOutput payload. The tool_input *is*
  *  the structured object (schema-defined, arbitrary shape), so prefer a
  *  conventional `summary` field, then an `<id>: <refinedFix>` pair (review/
- *  fix workflows), then any string scalar, then a count. Truncated to keep
- *  the duplicated copies small. */
+ *  fix workflows), then any string scalar, then a per-field breakdown.
+ *  Truncated to keep the duplicated copies small. */
 function structuredOutputSummary(toolInput: Record<string, any>): string {
   return truncate(rawStructuredOutputSummary(toolInput), STRUCTURED_OUTPUT_SUMMARY_MAX)
 }
@@ -193,17 +193,39 @@ function rawStructuredOutputSummary(toolInput: Record<string, any>): string {
   for (const value of Object.values(toolInput)) {
     if (usableSummary(value)) return oneLine(value)
   }
-  const n = Object.keys(toolInput).length
-  return n > 0 ? `‹${n} ${n === 1 ? 'field' : 'fields'}›` : ''
+  // No usable scalar: describe each field by name, with array lengths and
+  // nested-object key counts (e.g. `‹findings: 8›`). Far more useful than a
+  // bare `‹N fields›`. Wrapped in guillemets so `isWeakSummary` still treats
+  // it as a synthesized placeholder (a failure promotes its error instead).
+  const fields = Object.entries(toolInput)
+    .map(([key, value]) => describeField(key, value))
+    .join(', ')
+  return fields ? `‹${fields}›` : ''
 }
 
-/** A summary that carries no real information: empty, too short, or the
- *  `‹N fields›` placeholder. Used to decide whether a tool failure should
- *  overwrite the row summary with its error. */
+/** One token describing a StructuredOutput field for the count fallback:
+ *  arrays show their length, nested objects their key count, scalars their
+ *  value, and empty/nullish values just the key name. */
+function describeField(key: string, value: unknown): string {
+  if (Array.isArray(value)) return `${key}: ${value.length}`
+  if (value && typeof value === 'object') return `${key}: {${Object.keys(value).length}}`
+  if (typeof value === 'string') {
+    const t = oneLine(value)
+    return t ? `${key}: ${t}` : key
+  }
+  if (value === null || value === undefined) return key
+  return `${key}: ${value}`
+}
+
+/** A summary that carries no real information: empty, too short, or a
+ *  synthesized field-breakdown placeholder (anything wrapped in guillemets,
+ *  e.g. `‹findings: 8›`). Used to decide whether a tool failure should
+ *  overwrite the row summary with its error. Tests `startsWith` rather than a
+ *  full match so a truncated placeholder is still recognized. */
 export function isWeakSummary(s: string | undefined | null): boolean {
   if (!s) return true
   const t = s.trim()
-  return t.length < 3 || /^‹\d+ fields?›$/.test(t)
+  return t.length < 3 || t.startsWith('‹')
 }
 
 /** Truncate with an ellipsis when over `max` characters. */
